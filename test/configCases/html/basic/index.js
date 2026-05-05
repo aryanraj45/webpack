@@ -1,3 +1,7 @@
+"use strict";
+
+/** @type {import("../../../../").Configuration} */
+
 import page from "./page.html";
 
 it("should compile and export html as string", () => {
