@@ -124,6 +124,7 @@ describe("snapshots", () => {
 		    "css": undefined,
 		    "deferImport": false,
 		    "futureDefaults": false,
+		    "html": undefined,
 		    "lazyCompilation": undefined,
 		    "outputModule": false,
 		    "sourceImport": false,
@@ -470,6 +471,7 @@ describe("snapshots", () => {
 		        ],
 		        "conditionNames": Array [
 		          "require",
+		          "module-sync",
 		          "module",
 		          "...",
 		        ],
@@ -490,6 +492,7 @@ describe("snapshots", () => {
 		        ],
 		        "conditionNames": Array [
 		          "require",
+		          "module-sync",
 		          "module",
 		          "...",
 		        ],
@@ -510,6 +513,7 @@ describe("snapshots", () => {
 		        ],
 		        "conditionNames": Array [
 		          "import",
+		          "module-sync",
 		          "module",
 		          "...",
 		        ],
@@ -530,6 +534,7 @@ describe("snapshots", () => {
 		        ],
 		        "conditionNames": Array [
 		          "require",
+		          "module-sync",
 		          "module",
 		          "...",
 		        ],
@@ -550,6 +555,7 @@ describe("snapshots", () => {
 		        ],
 		        "conditionNames": Array [
 		          "import",
+		          "module-sync",
 		          "module",
 		          "...",
 		        ],
@@ -570,6 +576,7 @@ describe("snapshots", () => {
 		        ],
 		        "conditionNames": Array [
 		          "require",
+		          "module-sync",
 		          "module",
 		          "...",
 		        ],
@@ -590,6 +597,7 @@ describe("snapshots", () => {
 		        ],
 		        "conditionNames": Array [
 		          "require",
+		          "module-sync",
 		          "module",
 		          "...",
 		        ],
@@ -613,6 +621,7 @@ describe("snapshots", () => {
 		        ],
 		        "conditionNames": Array [
 		          "import",
+		          "module-sync",
 		          "module",
 		          "...",
 		        ],
@@ -634,6 +643,7 @@ describe("snapshots", () => {
 		        "conditionNames": Array [
 		          "worker",
 		          "import",
+		          "module-sync",
 		          "module",
 		          "...",
 		        ],
@@ -2288,7 +2298,9 @@ describe("snapshots", () => {
 			+     "css": true,
 			@@ ... @@
 			-     "futureDefaults": false,
+			-     "html": undefined,
 			+     "futureDefaults": true,
+			+     "html": true,
 			@@ ... @@
 			+       },
 			+       Object {
@@ -2345,6 +2357,7 @@ describe("snapshots", () => {
 			+       },
 			+       Object {
 			+         "dependency": /css-import-local-module/,
+			+         "exclude": /\\.module\\.\\w+$/i,
 			+         "resolve": Object {
 			+           "fullySpecified": true,
 			+           "preferRelative": true,
@@ -2353,6 +2366,7 @@ describe("snapshots", () => {
 			+       },
 			+       Object {
 			+         "dependency": /css-import-global-module/,
+			+         "exclude": /\\.module\\.\\w+$/i,
 			+         "resolve": Object {
 			+           "fullySpecified": true,
 			+           "preferRelative": true,
@@ -2382,6 +2396,23 @@ describe("snapshots", () => {
 			+           "fullySpecified": true,
 			+           "preferRelative": true,
 			+         },
+			+       },
+			+       Object {
+			+         "resolve": Object {
+			+           "fullySpecified": true,
+			+           "preferRelative": true,
+			+         },
+			+         "test": /\\.html$/i,
+			+         "type": "html",
+			@@ ... @@
+			+         "mimetype": "text/html",
+			+         "resolve": Object {
+			+           "fullySpecified": true,
+			+           "preferRelative": true,
+			+         },
+			+         "type": "html",
+			+       },
+			+       Object {
 			@@ ... @@
 			+       "css": Object {
 			+         "esModule": true,
@@ -2412,11 +2443,13 @@ describe("snapshots", () => {
 			+         "localIdentName": "[fullhash]",
 			+       },
 			@@ ... @@
+			+         },
+			+       },
 			+       "css": Object {
 			+         "import": true,
 			+         "namedExports": true,
 			+         "url": true,
-			+       },
+			@@ ... @@
 			+       "css/auto": Object {
 			+         "animation": true,
 			+         "container": true,
@@ -2424,7 +2457,7 @@ describe("snapshots", () => {
 			+         "dashedIdents": true,
 			+         "function": true,
 			+         "grid": true,
-			+       },
+			@@ ... @@
 			+       "css/global": Object {
 			+         "animation": true,
 			+         "container": true,
@@ -2464,9 +2497,6 @@ describe("snapshots", () => {
 			+     "hashDigestLength": 16,
 			+     "hashFunction": "xxhash64",
 			@@ ... @@
-			+           "...",
-			+         ],
-			+       },
 			+       "css-import": Object {
 			+         "conditionNames": Array [
 			+           "webpack",
@@ -2510,9 +2540,11 @@ describe("snapshots", () => {
 			+         ],
 			+         "mainFields": Array [
 			+           "style",
-			@@ ... @@
+			+           "...",
+			+         ],
 			+         "mainFiles": Array [],
 			+         "preferRelative": true,
+			+       },
 			@@ ... @@
 			-     "cache": false,
 			+     "cache": true,
@@ -2871,8 +2903,11 @@ describe("snapshots", () => {
 			+     "css": true,
 			@@ ... @@
 			-     "futureDefaults": false,
+			-     "html": undefined,
 			+     "futureDefaults": true,
+			+     "html": true,
 			@@ ... @@
+			+       },
 			+       Object {
 			+         "rules": Array [
 			+           Object {
@@ -2890,7 +2925,7 @@ describe("snapshots", () => {
 			+       Object {
 			+         "mimetype": "application/wasm",
 			+         "rules": Array [
-			@@ ... @@
+			+           Object {
 			+             "descriptionData": Object {
 			+               "type": "module",
 			+             },
@@ -2900,8 +2935,7 @@ describe("snapshots", () => {
 			+           },
 			+         ],
 			+         "type": "webassembly/async",
-			+       },
-			+       Object {
+			@@ ... @@
 			+         "resolve": Object {
 			+           "fullySpecified": true,
 			+           "preferRelative": true,
@@ -2927,6 +2961,7 @@ describe("snapshots", () => {
 			+       },
 			+       Object {
 			+         "dependency": /css-import-local-module/,
+			+         "exclude": /\\.module\\.\\w+$/i,
 			+         "resolve": Object {
 			+           "fullySpecified": true,
 			+           "preferRelative": true,
@@ -2935,6 +2970,7 @@ describe("snapshots", () => {
 			+       },
 			+       Object {
 			+         "dependency": /css-import-global-module/,
+			+         "exclude": /\\.module\\.\\w+$/i,
 			+         "resolve": Object {
 			+           "fullySpecified": true,
 			+           "preferRelative": true,
@@ -2964,6 +3000,22 @@ describe("snapshots", () => {
 			+           "fullySpecified": true,
 			+           "preferRelative": true,
 			+         },
+			+       },
+			+       Object {
+			+         "resolve": Object {
+			+           "fullySpecified": true,
+			+           "preferRelative": true,
+			+         },
+			+         "test": /\\.html$/i,
+			+         "type": "html",
+			+       },
+			+       Object {
+			+         "mimetype": "text/html",
+			+         "resolve": Object {
+			+           "fullySpecified": true,
+			+           "preferRelative": true,
+			+         },
+			+         "type": "html",
 			+       },
 			+       Object {
 			@@ ... @@
@@ -2996,11 +3048,13 @@ describe("snapshots", () => {
 			+         "localIdentName": "[fullhash]",
 			+       },
 			@@ ... @@
+			+         },
+			+       },
 			+       "css": Object {
 			+         "import": true,
 			+         "namedExports": true,
 			+         "url": true,
-			+       },
+			@@ ... @@
 			+       "css/auto": Object {
 			+         "animation": true,
 			+         "container": true,
@@ -3008,7 +3062,7 @@ describe("snapshots", () => {
 			+         "dashedIdents": true,
 			+         "function": true,
 			+         "grid": true,
-			+       },
+			@@ ... @@
 			+       "css/global": Object {
 			+         "animation": true,
 			+         "container": true,
@@ -3045,6 +3099,9 @@ describe("snapshots", () => {
 			+     "hashDigestLength": 16,
 			+     "hashFunction": "xxhash64",
 			@@ ... @@
+			+           "...",
+			+         ],
+			+       },
 			+       "css-import": Object {
 			+         "conditionNames": Array [
 			+           "webpack",
@@ -3072,11 +3129,10 @@ describe("snapshots", () => {
 			+         ],
 			+         "mainFields": Array [
 			+           "style",
-			+           "...",
-			+         ],
+			@@ ... @@
 			+         "mainFiles": Array [],
 			+         "preferRelative": true,
-			+       },
+			@@ ... @@
 			+       "css-import-local-module": Object {
 			+         "conditionNames": Array [
 			+           "webpack",
@@ -3124,12 +3180,13 @@ describe("snapshots", () => {
 			+     "css": false,
 			@@ ... @@
 			-     "futureDefaults": false,
+			-     "html": undefined,
 			+     "futureDefaults": true,
+			+     "html": true,
 			@@ ... @@
-			+       },
 			+       Object {
 			+         "rules": Array [
-			+           Object {
+			@@ ... @@
 			+             "descriptionData": Object {
 			+               "type": "module",
 			+             },
@@ -3140,7 +3197,8 @@ describe("snapshots", () => {
 			+         ],
 			+         "test": /\\.wasm$/i,
 			+         "type": "webassembly/async",
-			@@ ... @@
+			+       },
+			+       Object {
 			+         "mimetype": "application/wasm",
 			+         "rules": Array [
 			+           Object {
@@ -3153,6 +3211,22 @@ describe("snapshots", () => {
 			+           },
 			+         ],
 			+         "type": "webassembly/async",
+			+       },
+			+       Object {
+			+         "resolve": Object {
+			+           "fullySpecified": true,
+			+           "preferRelative": true,
+			+         },
+			+         "test": /\\.html$/i,
+			+         "type": "html",
+			+       },
+			+       Object {
+			+         "mimetype": "text/html",
+			+         "resolve": Object {
+			+           "fullySpecified": true,
+			+           "preferRelative": true,
+			+         },
+			+         "type": "html",
 			+       },
 			+       Object {
 			@@ ... @@

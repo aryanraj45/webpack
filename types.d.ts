@@ -5000,6 +5000,11 @@ declare interface ContextResolveData {
 	contextDependencies: LazySet<string>;
 	dependencies: ContextDependency[];
 }
+type ContextTimestamp =
+	| null
+	| ContextFileSystemInfoEntry
+	| "ignore"
+	| ExistenceOnlyTimeEntryFileSystemInfo;
 declare interface ContextTimestampAndHash {
 	safeTime: number;
 	timestampHash?: string;
@@ -5160,7 +5165,7 @@ declare interface CssModuleGeneratorOptions {
 		| "camel-case-only"
 		| "dashes"
 		| "dashes-only"
-		| ((name: string) => string);
+		| ((name: string) => string | string[]);
 
 	/**
 	 * Avoid generating and loading a stylesheet and only embed exports from css into output javascript files.
@@ -6876,6 +6881,12 @@ declare interface Experiments {
 	futureDefaults?: boolean;
 
 	/**
+	 * Enable experimental HTML support. This flag does not by itself make `.html` files usable directly as entry points without additional HTML handling.
+	 * @experimental
+	 */
+	html?: boolean;
+
+	/**
 	 * Compile entrypoints and import()s only when they are accessed.
 	 * @experimental
 	 */
@@ -6945,6 +6956,12 @@ declare interface ExperimentsNormalized {
 	 * @experimental
 	 */
 	futureDefaults?: boolean;
+
+	/**
+	 * Enable HTML entry support. Treats `.html` files as a first-class module type so they can be used directly as entry points.
+	 * @experimental
+	 */
+	html?: boolean;
 
 	/**
 	 * Compile entrypoints and import()s only when they are accessed.
@@ -8046,13 +8063,7 @@ declare abstract class FileSystemInfo {
 	 * Adds file timestamps.
 	 */
 	addFileTimestamps(
-		map: ReadonlyMap<
-			string,
-			| null
-			| FileSystemInfoEntry
-			| "ignore"
-			| ExistenceOnlyTimeEntryFileSystemInfo
-		>,
+		map: ReadonlyMap<string, FileTimestamp>,
 		immutable?: boolean
 	): void;
 
@@ -8060,13 +8071,7 @@ declare abstract class FileSystemInfo {
 	 * Adds context timestamps.
 	 */
 	addContextTimestamps(
-		map: ReadonlyMap<
-			string,
-			| null
-			| ContextFileSystemInfoEntry
-			| "ignore"
-			| ExistenceOnlyTimeEntryFileSystemInfo
-		>,
+		map: ReadonlyMap<string, ContextTimestamp>,
 		immutable?: boolean
 	): void;
 
@@ -8173,6 +8178,11 @@ declare interface FileSystemInfoEntry {
 	safeTime: number;
 	timestamp?: number;
 }
+type FileTimestamp =
+	| null
+	| FileSystemInfoEntry
+	| "ignore"
+	| ExistenceOnlyTimeEntryFileSystemInfo;
 type FilterItemTypes = string | RegExp | ((value: string) => boolean);
 declare interface Flags {
 	[index: string]: Argument;
@@ -8792,6 +8802,38 @@ declare interface HotModuleReplacementPluginLoaderContext {
 declare class HotUpdateChunk extends Chunk {
 	constructor();
 }
+declare abstract class HtmlGenerator extends Generator {
+	/**
+	 * Processes the provided module.
+	 */
+	sourceDependency(
+		module: NormalModule,
+		dependency: Dependency,
+		initFragments: InitFragment<GenerateContext>[],
+		source: ReplaceSource,
+		generateContext: GenerateContext
+	): void;
+
+	/**
+	 * Processes the provided module.
+	 */
+	sourceModule(
+		module: NormalModule,
+		initFragments: InitFragment<GenerateContext>[],
+		source: ReplaceSource,
+		generateContext: GenerateContext
+	): void;
+
+	/**
+	 * Generates fallback output for the provided error condition.
+	 */
+	generateError(
+		error: Error,
+		module: NormalModule,
+		generateContext: GenerateContext
+	): null | Source;
+}
+declare abstract class HtmlParser extends ParserClass {}
 
 /**
  * Options for building http resources.
@@ -9208,6 +9250,7 @@ type IgnorePluginOptions =
 type ImportAttributes = Record<string, string> & {};
 declare interface ImportDependencyMeta {
 	attributes?: ImportAttributes;
+	phase?: 0 | 1 | 2;
 	externalType?: "import" | "module";
 }
 type ImportExpressionJavascriptParser = ImportExpressionImport & {
@@ -12157,7 +12200,7 @@ declare interface KnownBuildMeta {
 	treatAsCommonJs?: boolean;
 	async?: boolean;
 	sideEffectFree?: boolean;
-	isCSSModule?: boolean;
+	isCssModule?: boolean;
 	jsIncompatibleExports?: Record<string, string>;
 	exportsFinalNameByRuntime?: Map<string, Record<string, string>>;
 	exportsSourceByRuntime?: Map<string, string>;
@@ -15985,6 +16028,7 @@ declare abstract class NormalModuleFactory extends ModuleFactory {
 					"css/global",
 					SyncBailHook<[CssModuleParserOptions], CssParser>
 				> &
+				Record<"html", SyncBailHook<[EmptyParserOptions], HtmlParser>> &
 				Record<string, SyncBailHook<[ParserOptions], ParserClass>>
 		>;
 		parser: TypedHookMap<
@@ -16039,6 +16083,7 @@ declare abstract class NormalModuleFactory extends ModuleFactory {
 					"css/global",
 					SyncBailHook<[CssParser, CssModuleParserOptions], void>
 				> &
+				Record<"html", SyncBailHook<[HtmlParser, EmptyParserOptions], void>> &
 				Record<string, SyncBailHook<[ParserClass, ParserOptions], void>>
 		>;
 		createGenerator: TypedHookMap<
@@ -16093,6 +16138,7 @@ declare abstract class NormalModuleFactory extends ModuleFactory {
 					"css/global",
 					SyncBailHook<[CssModuleGeneratorOptions], CssGenerator>
 				> &
+				Record<"html", SyncBailHook<[EmptyGeneratorOptions], HtmlGenerator>> &
 				Record<string, SyncBailHook<[GeneratorOptions], Generator>>
 		>;
 		generator: TypedHookMap<
@@ -16152,6 +16198,10 @@ declare abstract class NormalModuleFactory extends ModuleFactory {
 				Record<
 					"css/global",
 					SyncBailHook<[CssGenerator, CssModuleGeneratorOptions], void>
+				> &
+				Record<
+					"html",
+					SyncBailHook<[HtmlGenerator, EmptyGeneratorOptions], void>
 				> &
 				Record<string, SyncBailHook<[Generator, GeneratorOptions], void>>
 		>;
@@ -18305,6 +18355,18 @@ declare class ProgressPlugin {
 	showDependencies: boolean;
 	showActiveModules: boolean;
 	percentBy: null | "entries" | "modules" | "dependencies";
+	progressBar:
+		| false
+		| Required<{
+				/**
+				 * Color used for the filled portion of the bar.
+				 */
+				color?: string;
+				/**
+				 * Name shown before the progress bar.
+				 */
+				name?: string;
+		  }>;
 
 	/**
 	 * Applies the plugin by registering its hooks on the compiler.
@@ -18320,7 +18382,19 @@ declare class ProgressPlugin {
 	static defaultOptions: Required<Omit<ProgressPluginOptions, "handler">>;
 	static createDefaultHandler: (
 		profile: undefined | null | boolean,
-		logger: WebpackLogger
+		logger: WebpackLogger,
+		progressBar:
+			| false
+			| Required<{
+					/**
+					 * Color used for the filled portion of the bar.
+					 */
+					color?: string;
+					/**
+					 * Name shown before the progress bar.
+					 */
+					name?: string;
+			  }>
 	) => (percentage: number, msg: string, ...args: string[]) => void;
 }
 type ProgressPluginArgument =
@@ -18375,6 +18449,22 @@ declare interface ProgressPluginOptions {
 	 * Collect profile data for progress steps. Default: false.
 	 */
 	profile?: null | boolean;
+
+	/**
+	 * Generate progress bar. Default: false.
+	 */
+	progressBar?:
+		| boolean
+		| {
+				/**
+				 * Color used for the filled portion of the bar.
+				 */
+				color?: string;
+				/**
+				 * Name shown before the progress bar.
+				 */
+				name?: string;
+		  };
 }
 declare class ProvidePlugin {
 	/**

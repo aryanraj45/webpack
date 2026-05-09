@@ -1,11 +1,22 @@
 "use strict";
 
 const path = require("path");
+const webpack = require("../../../../");
 
 /** @typedef {import("../../../../").PathData} PathData */
+/** @typedef {import("../../../../").Configuration} Configuration */
+/** @typedef {"link" | "text" | "css-style-sheet" | "style"} ExportType */
 
-/** @type {import("../../../../").Configuration} */
-module.exports = {
+const EXPORT_TYPES =
+	/** @type {ExportType[]} */
+	(["link", "text", "css-style-sheet", "style"]);
+
+/**
+ * @param {ExportType} exportType css parser exportType
+ * @returns {Configuration} webpack configuration
+ */
+const createConfig = (exportType) => ({
+	name: exportType,
 	target: "web",
 	mode: "development",
 	devtool: false,
@@ -89,8 +100,60 @@ module.exports = {
 					localIdentName: (pathData) =>
 						`prefix-${pathData.filename}---${pathData.local}---${pathData.hash}-postfix`
 				}
+			},
+			{
+				test: /.css$/,
+				resourceQuery: /\?local-ident-name-10$/,
+				generator: {
+					localIdentName: "[name]--[local]--[fullhash]",
+					localIdentHashSalt: "my-custom-salt"
+				}
+			},
+			{
+				test: /.css$/,
+				resourceQuery: /\?local-ident-name-11$/,
+				generator: {
+					localIdentName: "[name]--[local]--[fullhash]",
+					localIdentHashDigest: "hex",
+					localIdentHashDigestLength: 8
+				}
+			},
+			{
+				test: /.css$/,
+				resourceQuery: /\?local-ident-name-12$/,
+				generator: {
+					localIdentName: "[name]--[local]--[fullhash]",
+					localIdentHashDigest: "base64",
+					localIdentHashDigestLength: 8
+				}
+			},
+			{
+				test: /.css$/,
+				resourceQuery: /\?local-ident-name-13$/,
+				generator: {
+					localIdentName: "[name]--[local]--[fullhash]",
+					localIdentHashFunction: "md4",
+					localIdentHashDigest: "base64url",
+					localIdentHashDigestLength: 6
+				}
+			},
+			{
+				test: /.css$/,
+				resourceQuery: /\?local-ident-name-14$/,
+				generator: {
+					localIdentName: "[name]--[local]--[fullhash]",
+					localIdentHashFunction: "sha256",
+					localIdentHashSalt: "another-salt",
+					localIdentHashDigest: "hex",
+					localIdentHashDigestLength: 12
+				}
 			}
-		]
+		],
+		parser: {
+			css: {
+				exportType
+			}
+		}
 	},
 	resolve: {
 		alias: {
@@ -100,5 +163,12 @@ module.exports = {
 	},
 	experiments: {
 		css: true
-	}
-};
+	},
+	plugins: [
+		new webpack.DefinePlugin({
+			"process.env.EXPORT_TYPE": JSON.stringify(exportType)
+		})
+	]
+});
+
+module.exports = EXPORT_TYPES.map(createConfig);
