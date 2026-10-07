@@ -440,6 +440,21 @@ const IMPROVED_CASES = [
 		{ compress: { ecma: 2021 }, ecma: 2021, mangle: false }
 	],
 	[
+		"a test for null or undefined choosing a name or another value, as `??`, from ECMAScript 2020",
+		"function f(a, b) { return null != a ? a : b; } function g(a, b) { return null == a ? b : a; } function h(a, b) { return void 0 != a ? a : b; } function i(a, b, c) { return null != a ? a : null != b ? b : c; } function j(k, b) { var a; return null != (a = k()) ? a : b; } function l(a, b, c) { return (null != a ? a : b) || c; } function m(a, b, c) { return null != a ? a : b || c; } console.log(f(0, 1), f(null, 2), g(void 0, 3), g('', 4), h(null, 5), i(null, void 0, 6), i(null, 0, 7), j(() => null, 8), j(() => 0, 9), l(0, 1, 10), l(null, 0, 11), m(null, 0, 12), m(1, 0, 13));",
+		{ compress: { ecma: 2020 }, ecma: 2020, mangle: false }
+	],
+	[
+		"a test for null or undefined whose value nothing reads, as `??`, from ECMAScript 2020",
+		"function f(a, o, g) { null == a && console.log('a'); null != o.x || console.log('o.x'); console.log('x'), null == g() && console.log('g()'), console.log('y'); return void 0 == a && console.log('void'), 1; } console.log(f(null, {}, () => void 0), f(0, { x: 0 }, () => 0));",
+		{ compress: { ecma: 2020 }, ecma: 2020, mangle: false }
+	],
+	[
+		"a test for null or undefined guarding an assignment, as `??=`, from ECMAScript 2021",
+		"function f(a, b, o) { null == a && (a = b); null != o.x || (o.x = 5); return null != a ? a : (a = 1), [a, o.x]; } function g(a) { return null != a ? a : (a = 2); } console.log(f(null, 1, {}), f(0, 1, { x: 0 }), g(null), g(3));",
+		{ compress: { ecma: 2021 }, ecma: 2021, mangle: false }
+	],
+	[
 		"a test for null or undefined guarding a chain, from ECMAScript 2020",
 		"function f(c) { return null == c ? void 0 : c.a.b(); } function g(c) { return null != c ? c() : void 0; } function h(c) { return void 0 == c ? void 0 : c.a?.[0]; } console.log(f(null), f({ a: { b: () => 1 } }), g(void 0), g(() => 2), h(null), h({ a: [3] }));",
 		{ compress: { ecma: 2020 }, ecma: 2020, mangle: false }
@@ -5052,12 +5067,50 @@ describe("syntax-printer", () => {
 				["var n = 0; Object.defineProperty(globalThis, \"a\", { get: function () { return n++ ? null : { p: 1 }; }, configurable: true }); function f() { return null == a ? void 0 : a.p; } try { console.log(f()); } catch (e) { console.log(e.name); }", target(2021)],
 				["function f(o, c) { with (o) { return null == c ? void 0 : c.p; } } console.log(f({}, null), f({ c: { p: 2 } }, { p: 1 }));", target(2021)],
 				["function f(o, c) { with (o) { c || (c = 1); return c; } } console.log(f({}, 0), f({ c: 0 }, 2));", target(2021)],
-				["function f(o, k) { o[k] || (o[k] = 1); return o; } var n = 0; console.log(JSON.stringify(f({}, { toString: function () { return \"k\" + n++; } })));", target(2021)]
+				["function f(o, k) { o[k] || (o[k] = 1); return o; } var n = 0; console.log(JSON.stringify(f({}, { toString: function () { return \"k\" + n++; } })));", target(2021)],
+				["function f(a, b) { null == a && b(); return null != a ? a : b; } console.log(f(null, () => 1));", target(2019)],
+				["var n = 0; Object.defineProperty(globalThis, \"a\", { get: function () { return n++ ? null : 1; }, configurable: true }); console.log(null != a ? a : 2);", target(2020)],
+				["function f(o, a) { with (o) { return null != a ? a : 2; } } console.log(f({}, null), f({ a: 1 }, 0));", target(2020)],
+				["function f(a, b) { return [null != a ? b : a, null !== a ? a : b, 0 != a ? a : b, null < a ? a : b]; } console.log(f(null, 1), f(void 0, 2));", target(2020)],
+				["function f(a, o, g) { return [null != (a += 1) ? a : 2, null != (o.x = g()) ? o.x : 3]; } console.log(f(1, {}, () => null));", target(2020)],
+				["function f(a, b) { var x = null == a && b, y = null != a && b; return null == a || console.log(1), [x, y]; } console.log(f(null, 1), f(0, 2));", target(2020)],
+				["function f(a, b) { 0 == a && b(1); 1 != a || b(2); } f(0, console.log), f(1, console.log);", target(2020)]
 			];
 			for (const [input, options] of cases) {
 				const { code } = await minify(input, options);
 				const reference = await terserReference().minify(input, options);
 				expect(code).toBe(reference.code);
+			}
+		});
+
+		it("should write a test for null or undefined as `??`, and as `??=` guarding an assignment", async () => {
+			const { minify } = await load();
+			/**
+			 * @param {import("terser").ECMA} ecma the ECMAScript version targeted
+			 * @returns {import("terser").MinifyOptions} options targeting it
+			 */
+			const target = (ecma) => ({ compress: { ecma }, ecma, mangle: false });
+			/** @type {[string, string, import("terser").MinifyOptions][]} */
+			const cases = [
+				["function f(a, b) { return null != a ? a : b; }", "function f(a,b){return a??b}", target(2020)],
+				["function f(a, b) { return null == a ? b : a; }", "function f(a,b){return a??b}", target(2020)],
+				["function f(a, b) { return a != null ? a : b; }", "function f(a,b){return a??b}", { ...target(2020), compress: { ecma: 2020, defaults: false } }],
+				["function f(a, b) { return a == null ? b : a; }", "function f(a,b){return a??b}", { ...target(2020), compress: { ecma: 2020, defaults: false } }],
+				["function f(a, b) { return null == a ? b : a; }", "function f(a,b){return a??b}", { ...target(2020), compress: { ecma: 2020, conditionals: false } }],
+				["function f(a, b, c) { return null != a ? a : null != b ? b : c; }", "function f(a,b,c){return a??b??c}", target(2020)],
+				["function f(k, b) { var a; var r = null != (a = k()) ? a : b; return [r, a]; }", "function f(k,b){var a;return[(a=k())??b,a]}", target(2020)],
+				["function f(a, b, c) { return [(null != a ? a : b) || c, null != a ? a : b || c]; }", "function f(a,b,c){return[(a??b)||c,a??(b||c)]}", target(2020)],
+				["function f(a) { null == a && g(); }", "function f(a){a??g()}", target(2020)],
+				["function f(a) { null != a || g(); }", "function f(a){a??g()}", target(2020)],
+				["function f(o) { g(), null == o.x && h(), i(); }", "function f(o){g(),o.x??h(),i()}", target(2020)],
+				["function f(o) { g(), null == o.x && h(); }", "function f(o){g(),o.x??h()}", target(2020)],
+				["function f(a, b) { null == a && (a = b); return a; }", "function f(a,b){return a??=b}", target(2021)],
+				["function f(a) { return null != a ? a : (a = 1); }", "function f(a){return a??=1}", target(2021)],
+				["function f(a) { return a == null && (a = g()), a; }", "function f(a){return a??=g()}", { ...target(2021), compress: { ecma: 2021, comparisons: false } }],
+				["function f(a) { g(), null == a && (a = 1), h(a); }", "function f(a){g(),a??=1,h(a)}", target(2021)]
+			];
+			for (const [input, expected, options] of cases) {
+				expect((await minify(input, options)).code).toBe(expected);
 			}
 		});
 
