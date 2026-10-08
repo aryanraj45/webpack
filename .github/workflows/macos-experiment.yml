@@ -37,23 +37,23 @@ jobs:
       - name: Record start time
         run: echo "START=$(date +%s)" >> "$GITHUB_ENV"
 
-      - name: Run (baseline)
+      - name: "Run: baseline"
         if: matrix.variant == 'baseline'
         run: yarn cover:integration:${{ matrix.part }} --ci --cacheDirectory .jest-cache
 
-      - name: Run (max-workers=3)
+      - name: "Run: max-workers=3"
         if: matrix.variant == 'max-workers'
         run: yarn cover:integration:${{ matrix.part }} --ci --cacheDirectory .jest-cache --maxWorkers=3
 
-      - name: Run (no-coverage)
+      - name: "Run: no-coverage"
         if: matrix.variant == 'no-coverage'
         run: yarn test:integration:${{ matrix.part }} --ci --cacheDirectory .jest-cache
 
-      - name: Run (no-spotlight)
+      - name: "Run: no-spotlight"
         if: matrix.variant == 'no-spotlight'
         run: yarn cover:integration:${{ matrix.part }} --ci --cacheDirectory .jest-cache
 
-      - name: Run (combined: maxWorkers=3 + no-spotlight, with coverage)
+      - name: "Run: combined (maxWorkers=3 + no-spotlight, with coverage)"
         if: matrix.variant == 'combined'
         run: yarn cover:integration:${{ matrix.part }} --ci --cacheDirectory .jest-cache --maxWorkers=3
 
