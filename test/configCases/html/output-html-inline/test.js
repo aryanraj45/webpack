@@ -27,6 +27,16 @@ it("inline: true inlines CSS chunks as <style> blocks", () => {
 	expect(styles[0]).toMatch(/color/);
 });
 
+it("inline: true reads a chunk file's type from its path, not its query", () => {
+	const html = readHtml("query.html");
+	const styles = inlineStyles(html);
+	expect(styles).toHaveLength(1);
+	expect(styles[0]).toMatch(/color/);
+	for (const script of inlineScripts(html)) {
+		expect(script).not.toMatch(/color/);
+	}
+});
+
 it('inline: "script" inlines JS but serves CSS externally', () => {
 	const html = readHtml("only-script.html");
 	expect(inlineScripts(html).length).toBeGreaterThan(0);
@@ -79,6 +89,14 @@ it("<!-- webpackInline: true --> inlines the tag without output.html.inline", ()
 	const scripts = inlineScripts(html);
 	expect(scripts.length).toBeGreaterThan(0);
 	expect(scripts[0]).toMatch(/console\.log/);
+});
+
+it("<!-- webpackInline: true --> drops the body of the inlined <script src>", () => {
+	const html = readHtml("magic-body.html");
+	const scripts = inlineScripts(html);
+	expect(scripts).toHaveLength(1);
+	expect(scripts[0]).toMatch(/console\.log/);
+	expect(html).not.toContain("MARK_BODY");
 });
 
 it("a malformed magic comment resets a pending webpackInline directive", () => {
@@ -223,6 +241,18 @@ it('inline: true keeps type="module" on an inlined module-script entry', () => {
 	expect(scriptTags(html).some((t) => t.includes("src="))).toBe(false);
 	expect(html).toMatch(/<script type="module">[\s\S]+?<\/script>/);
 });
+
+for (const page of ["page-classic.html", "page-typed.html"]) {
+	it(`inline: true writes the type="module" upgrade into the tag of ${page}`, () => {
+		const scripts =
+			readHtml(page).match(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>/gi) ||
+			[];
+		expect(scripts).toHaveLength(1);
+		expect(scripts[0]).toMatch(/^<script type="module">[\s\S]*console\.log/);
+		// Never after the inlined body, where it would be a syntax error.
+		expect(scripts[0]).not.toMatch(/(?:type="module"|module)<\/script[^>]*>$/i);
+	});
+}
 
 it("inline: true does not inline a <link rel=modulepreload> hint", () => {
 	const html = readHtml("modulepreload.html");

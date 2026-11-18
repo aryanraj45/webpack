@@ -1,14 +1,27 @@
 "use strict";
 
+const { fixture } = require("../helpers/fixture");
+
 const { SourceProcessor: CssSourceProcessor } = require("../../lib/css/syntax");
-const { NodeType: CssNodeType } = require("../../lib/css/syntax-parser");
+const {
+	Field: CssField,
+	Flag: CssFlag,
+	NodeType: CssNodeType,
+	Part: CssPart,
+	_blockTokenOf
+} = require("../../lib/css/syntax-parser");
 const { SourceProcessor: HtmlSourceProcessor } = require("../../lib/html/syntax");
-const { NodeType: HtmlNodeType } = require("../../lib/html/syntax-parser");
+const {
+	Field: HtmlField,
+	Flag: HtmlFlag,
+	NodeType: HtmlNodeType,
+	Part: HtmlPart
+} = require("../../lib/html/syntax-parser");
 const GenericSourceProcessor = require("../../lib/util/SourceProcessor");
 const { PrintContext } = require("../../lib/util/SourceProcessor");
 
-const CSS = "a {\n\tcolor : #ff0000 ;\n}\n";
-const HTML = "<div   class='a'  >\n  <p>x</p>\n</div>\n";
+const CSS = fixture("css", "source-processor-mode-css-walks-without-printing-when-none-is-asked-for");
+const HTML = fixture("html", "source-processor-mode-html-walks-without-printing-when-none-is-asked-for");
 
 /** @typedef {{ mode?: "minify" | "beautify", source?: string, content?: string }} PrintAsk */
 
@@ -33,7 +46,7 @@ describe("SourceProcessor", () => {
 			}
 		);
 
-		processor.process("", options);
+		processor.process(fixture("css", "source-processor-reuses-the-caller-s-print-options"), options);
 		expect(received).toBe(options);
 	});
 
@@ -70,22 +83,22 @@ describe("SourceProcessor", () => {
 
 		it("is not asked for by a walk", () => {
 			const { processor, loads } = counting();
-			expect(processor.process("x")).toBeUndefined();
+			expect(processor.process(fixture("css", "source-processor-deferred-printer-is-not-asked-for-by-a-walk-2"))).toBeUndefined();
 			expect(loads()).toBe(0);
 		});
 
 		it("is asked for once, by the first print", () => {
 			const { processor, loads } = counting();
-			processor.process("x");
-			processor.process("x", { mode: "minify" });
+			processor.process(fixture("css", "source-processor-deferred-printer-is-asked-for-once-by-the-first-print"));
+			processor.process(fixture("css", "source-processor-deferred-printer-is-asked-for-once-by-the-first-print-2"), { mode: "minify" });
 			expect(loads()).toBe(1);
 		});
 
 		it("is reused by every print after it", () => {
 			const { processor, loads } = counting();
-			processor.process("x", { mode: "minify" });
+			processor.process(fixture("css", "source-processor-deferred-printer-is-reused-by-every-print-after-it"), { mode: "minify" });
 			const first = processor._printer;
-			processor.process("x", { mode: "beautify" });
+			processor.process(fixture("css", "source-processor-deferred-printer-is-reused-by-every-print-after-it-2"), { mode: "beautify" });
 			expect(loads()).toBe(1);
 			expect(processor._printer).toBe(first);
 		});
@@ -97,7 +110,7 @@ describe("SourceProcessor", () => {
 				loads++;
 				return () => "";
 			});
-			processor.process("x", { mode: "minify" });
+			processor.process(fixture("css", "source-processor-deferred-printer-stays-out-of-a-processor-that-was-handed-its"), { mode: "minify" });
 			expect(processor._printer).toBe(printer);
 			expect(loads).toBe(0);
 		});
@@ -113,7 +126,8 @@ describe("SourceProcessor", () => {
 		const held = (context) => {
 			let chars = 0;
 			for (let i = 0; i < context._storeText.length; i++) {
-				chars += context._storeText[i].length;
+				const text = context._storeText[i];
+				if (text !== null) chars += text.length;
 			}
 			return chars;
 		};
@@ -159,15 +173,89 @@ describe("SourceProcessor", () => {
 			expect(held(context)).toBe(0);
 		});
 
+		it("prints a replaced node as its replacement, once, after running its printer", () => {
+			let printed = 0;
+			const context = new PrintContext({ mode: "minify" }, () => {
+				printed++;
+				return "printed";
+			});
+			expect(context.printNode(1, null)).toBe(false);
+			context.replace(2, "replaced");
+			expect(context.printNode(2, null)).toBe(true);
+			expect(context.get(2)).toBe("replaced");
+			expect(context.printNode(2, null)).toBe(false);
+			expect(context.get(2)).toBe("printed");
+			expect(printed).toBe(3);
+		});
+
 		it("answers for a node printed since the drop, and no earlier one", () => {
 			const context = new PrintContext({ mode: "minify" }, () => "z");
 			context.printNode(1, null);
 			expect(context.get(1)).toBe("z");
 			context.dropStore();
-			expect(context.get(1)).toBeUndefined();
+			expect(context.lookup(1)).toBeUndefined();
 			context.printNode(2, null);
 			expect(context.get(2)).toBe("z");
-			expect(context.get(1)).toBeUndefined();
+			expect(context.lookup(1)).toBeUndefined();
+			expect(context.get(1)).toBe("");
+		});
+
+		it("reads a node printed as its source once, and only when asked", () => {
+			const context = new PrintContext({ mode: "minify" }, () => "");
+			let reads = 0;
+			/**
+			 * @param {number} node node
+			 * @returns {string} its source
+			 */
+			const sourceText = (node) => {
+				reads++;
+				return `s${node}`;
+			};
+			context.printedSource(1, sourceText);
+			expect(reads).toBe(0);
+			expect(context.get(1)).toBe("s1");
+			expect(context.get(1)).toBe("s1");
+			expect(reads).toBe(1);
+			context.dropStore();
+			expect(context.lookup(1)).toBeUndefined();
+			expect(reads).toBe(1);
+		});
+	});
+
+	describe("deferred retractable pieces", () => {
+		/**
+		 * @returns {InstanceType<typeof PrintContext>} a context holding pieces `a`, `b` and `c`
+		 */
+		const pieces = () => {
+			const context = new PrintContext({ mode: "minify" }, () => "");
+			for (const text of ["a", "b", "c"]) context.emitRetractable(text);
+			return context;
+		};
+
+		it("reads a deferred piece's text once the output is read", () => {
+			const context = pieces();
+			const source = { text: "x" };
+			context.deferRetractable(1, source);
+			source.text = "y";
+			// A pass over the pieces reads it first, as the output would.
+			context.substitute(() => undefined, "\u0000");
+			source.text = "z";
+			expect(context.result()).toBe("ayc");
+		});
+
+		it("lets a later retract, rewrite or replacement of the piece win", () => {
+			const retracted = pieces();
+			retracted.deferRetractable(1, { text: "x" });
+			retracted.retract(1);
+			expect(retracted.result()).toBe("ac");
+			const rewritten = pieces();
+			rewritten.deferRetractable(1, { text: "x" });
+			rewritten.rewriteRetractable(1, "z");
+			expect(rewritten.result()).toBe("azc");
+			const replaced = pieces();
+			replaced.deferRetractable(1, { text: "x" });
+			replaced.replaceAll("all");
+			expect(replaced.result()).toBe("all");
 		});
 	});
 
@@ -217,7 +305,7 @@ describe("SourceProcessor", () => {
 				it("carries no state between calls", () => {
 					const processor = new Processor();
 					const first = processor.process(source, { mode: "minify" }).code;
-					processor.process("", { mode: "minify" });
+					processor.process(fixture("css", "source-processor-mode-carries-no-state-between-calls"), { mode: "minify" });
 					processor.process(source, { mode: "beautify" });
 					expect(processor.process(source, { mode: "minify" }).code).toBe(
 						first
@@ -271,14 +359,6 @@ describe("SourceProcessor", () => {
 					expect(map.sourcesContent).toEqual([source]);
 				});
 
-				it("prints the same output whether or not a map is asked for", () => {
-					expect(
-						new Processor().process(source, {
-							mode: "minify",
-							source: "in.txt"
-						}).code
-					).toBe(new Processor().process(source, { mode: "minify" }).code);
-				});
 			});
 		}
 
@@ -290,7 +370,7 @@ describe("SourceProcessor", () => {
 			// The first declaration is the one the second overrides, so minifying
 			// retracts the piece it was written into.
 			const SOURCE =
-				"a {\n  color : red ;\n  color : blue ;\n}\nb {\n  color : lime ;\n}\n";
+				fixture("css", "source-processor-source-map-over-the-flat-output-drops-the-mapping-of-a-piece");
 
 			/**
 			 * @param {"minify" | "beautify"} mode how to print
@@ -333,17 +413,1297 @@ describe("SourceProcessor", () => {
 				environment: { browsers: ["chrome 120"] }
 			};
 			const dropped = new CssSourceProcessor().process(
-				"@-webkit-keyframes a{from{opacity:0}}\n@keyframes a{from{opacity:0}}\n",
+				fixture("css", "source-processor-source-map-css-anchors-nothing-at-a-rule-the-prefix-pass-took"),
 				ask
 			);
 			// The same stylesheet with the twin never written, so the surviving rule
 			// stands on the same source line: both must map alike.
 			const alone = new CssSourceProcessor().process(
-				"\n@keyframes a{from{opacity:0}}\n",
+				fixture("css", "source-processor-source-map-css-anchors-nothing-at-a-rule-the-prefix-pass-took-2"),
 				ask
 			);
 			expect(dropped.code).toBe(alone.code);
 			expect(dropped.map.mappings).toBe(alone.map.mappings);
+		});
+	});
+
+	describe("node path", () => {
+		/**
+		 * @param {string} input source
+		 * @param {number} offset offset into it
+		 * @returns {[number, number]} 1-based line, 0-based column
+		 */
+		const lineColumn = (input, offset) => {
+			const before = input.slice(0, offset).split("\n");
+			return [before.length, before[before.length - 1].length];
+		};
+
+		/**
+		 * Reads a node through `NodePath` members only, as a language-agnostic visitor would.
+		 * @param {import("../../lib/util/SourceProcessor").NodePath<EXPECTED_ANY, EXPECTED_ANY>} path path
+		 * @param {string} input the parsed source
+		 * @returns {Record<string, unknown>} what a shared visitor sees
+		 */
+		const describeNode = (path, input) => {
+			const [start, end] = path.range();
+			const parent = path.parent;
+			/** @type {unknown[]} */
+			const children = [];
+			for (let i = 0, c = path.child(0); c !== 0; c = path.child(++i)) {
+				children.push(c);
+			}
+			return {
+				loc: path.loc(),
+				expectedLoc: [...lineColumn(input, start), ...lineColumn(input, end)],
+				source: path.source(),
+				slice: path.source(start, end),
+				index: path.index,
+				atIndex:
+					parent === null ? null : path.child(path.index, parent) === path.node,
+				childCount: path.childCount(),
+				children
+			};
+		};
+
+		it("counts each language's line terminators in loc", () => {
+			/**
+			 * @param {string} source two rules, a line terminator between them
+			 * @returns {number[]} the start line of every CSS identifier
+			 */
+			const cssLines = (source) => {
+				/** @type {number[]} */
+				const lines = [];
+				new CssSourceProcessor()
+					.use([CssNodeType.Ident], (path) => {
+						lines.push(path.loc()[0]);
+					})
+					.process(source);
+				return lines;
+			};
+			expect(cssLines(fixture("css", "source-processor-node-path-counts-each-language-s-line-terminators-in-loc-cr"))).toEqual([1, 1, 2, 2]);
+			expect(cssLines(fixture("css", "source-processor-node-path-counts-each-language-s-line-terminators-in-loc-ff"))).toEqual([1, 1, 2, 2]);
+			expect(cssLines(fixture("css", "source-processor-node-path-counts-each-language-s-line-terminators-in-loc-crlf"))).toEqual([1, 1, 2, 2]);
+			/**
+			 * @param {string} source three elements, a line terminator between each
+			 * @returns {number[]} the start line of every `<i>`
+			 */
+			const htmlLines = (source) => {
+				/** @type {number[]} */
+				const lines = [];
+				new HtmlSourceProcessor()
+					.use([HtmlNodeType.Element], (path) => {
+						if (path.name() === "i") lines.push(path.loc()[0]);
+					})
+					.process(source);
+				return lines;
+			};
+			// HTML ends a line at a lone CR, but a form feed is only whitespace.
+			expect(htmlLines(fixture("html", "source-processor-node-path-counts-each-language-s-line-terminators-in-loc-cr"))).toEqual([1, 2, 3]);
+			expect(htmlLines(fixture("html", "source-processor-node-path-counts-each-language-s-line-terminators-in-loc-crlf"))).toEqual([1, 2, 3]);
+		});
+
+		it("reads html nodes through the shared members", () => {
+			const input = fixture("html", "source-processor-node-path-reads-html-nodes-through-the-shared-members");
+			/** @type {Record<string, unknown>[]} */
+			const seen = [];
+			/** @type {[number, string][]} each child of the list, and its own first child's type */
+			const listChildren = [];
+			/** @type {[string, string | null, number | null][]} name, its source, content offset */
+			const implied = [];
+			new HtmlSourceProcessor()
+				.use({
+					[HtmlNodeType.Element]: (path) => {
+						if (path.name() === "ul") {
+							// Reading each child's own children between steps keeps the
+							// list's place: the cursor is per parent.
+							for (let i = 0; i < path.childCount(); i++) {
+								const item = path.child(i);
+								const inner = path.child(0, item);
+								listChildren.push([
+									path.type(item),
+									inner === 0 ? "" : path.source(inner)
+								]);
+							}
+							expect(path.child(listChildren.length)).toBe(0);
+							expect(path.child(1)).toBe(path.child(1));
+							expect(path.type(path.child(0))).toBe(HtmlNodeType.Text);
+						}
+						if (path.name() === "li") seen.push(describeNode(path, input));
+						const name = path.rangeOf(HtmlPart.name);
+						const content = path.rangeOf(HtmlPart.content);
+						implied.push([
+							path.name(),
+							name === null ? null : path.source(...name),
+							content === null ? null : content[0] - path.range()[0]
+						]);
+					}
+				})
+				.process(input);
+			expect(listChildren).toEqual([
+				[HtmlNodeType.Text, ""],
+				[HtmlNodeType.Element, "a"],
+				[HtmlNodeType.Text, ""],
+				[HtmlNodeType.Element, "b"]
+			]);
+			expect(implied).toEqual([
+				["html", null, null],
+				["head", null, null],
+				["body", null, null],
+				["ul", "ul", 4],
+				["li", "li", 4],
+				["li", "li", 4]
+			]);
+			expect(seen).toHaveLength(2);
+			for (const node of seen) {
+				expect(node.loc).toEqual(node.expectedLoc);
+				expect(node.source).toBe(node.slice);
+				expect(node.atIndex).toBe(true);
+				expect(node.childCount).toBe(1);
+				expect(node.children).toHaveLength(1);
+			}
+			expect(seen.map((node) => node.index)).toEqual([1, 3]);
+			expect(seen.map((node) => node.source)).toEqual([
+				"<li>a</li>",
+				"<li>b</li>"
+			]);
+			expect(seen[1].loc).toEqual([3, 0, 3, 10]);
+		});
+
+		it("reads names and values decoded, and as written through source", () => {
+			/** @type {string[]} */
+			const css = [];
+			new CssSourceProcessor()
+				.use(
+					[CssNodeType.AtRule, CssNodeType.Declaration, CssNodeType.String],
+					(path) => {
+						const written =
+							path.type() === CssNodeType.String
+								? path.source()
+								: path.source(.../** @type {[number, number]} */ (path.rangeOf(CssPart.name)));
+						css.push(`${path.name()}|${path.value()}|${written}`);
+					}
+				)
+				.process(fixture("css", "source-processor-node-path-reads-names-and-values-decoded-and-as-written-through"));
+			expect(css).toEqual([
+				"media||m\\65 dia",
+				"color||co\\6cor",
+				"content||content",
+				'|Ab|"\\41 b"'
+			]);
+			/** @type {string[]} */
+			const html = [];
+			new HtmlSourceProcessor()
+				.use(
+					[
+						HtmlNodeType.Doctype,
+						HtmlNodeType.Element,
+						HtmlNodeType.Text,
+						HtmlNodeType.Comment
+					],
+					(path) => {
+						if (path.type() === HtmlNodeType.Element && path.parent !== null) {
+							if (path.name() !== "b") return;
+						}
+						html.push(`${path.name()}|${path.value()}`);
+					}
+				)
+				.process(fixture("html", "source-processor-node-path-reads-names-and-values-decoded-and-as-written-through"));
+			expect(html).toEqual(["html|", "b|", "|a & b", "|c"]);
+		});
+
+		it("reads css numbers as numbers and leaves source exactly as written", () => {
+			/** @type {[string, unknown, string, string][]} */
+			const seen = [];
+			const input = fixture("css", "source-processor-node-path-reads-css-numbers-as-numbers-and-leaves-source");
+			new CssSourceProcessor()
+				.use(
+					[
+						CssNodeType.Dimension,
+						CssNodeType.Percentage,
+						CssNodeType.Number,
+						CssNodeType.Ident,
+						CssNodeType.Comment
+					],
+					(path) => {
+						seen.push([
+							path.source(),
+							path.value(),
+							path.type() === CssNodeType.Dimension ? path.name() : "",
+							path.source(path.range()[0], path.range()[1])
+						]);
+					}
+				)
+				.process(input);
+			expect(seen).toEqual([
+				["a", "a", "", "a"],
+				["1\\70x", 1, "px", "1\\70x"],
+				["50%", 50, "", "50%"],
+				["+1.50e1", 15, "", "+1.50e1"],
+				["a\u0000b", "a\uFFFDb", "", "a\u0000b"],
+				["/* c */", " c ", "", "/* c */"],
+				["z", "z", "", "z"],
+				["q\\", "q\uFFFD", "", "q\\"]
+			]);
+		});
+
+		it("reads every part of a node as a [start, end] range", () => {
+			const css = fixture("css", "source-processor-node-path-reads-every-part-of-a-node-as-a-start-end-range");
+			/** @type {Record<string, unknown>[]} */
+			const cssSeen = [];
+			new CssSourceProcessor()
+				.use([CssNodeType.AtRule, CssNodeType.Url], (path) => {
+					/**
+					 * @param {[number, number] | null} range range
+					 * @returns {string | null} what it covers
+					 */
+					const text = (range) => (range === null ? null : path.source(...range));
+					cssSeen.push({
+						source: path.source(...path.range()),
+						name: text(path.rangeOf(CssPart.name)),
+						value: text(path.rangeOf(CssPart.value)),
+						block: text(path.rangeOf(CssPart.block)),
+						rules: path.fieldCount(CssField.rules)
+					});
+				})
+				.process(css);
+			expect(cssSeen).toEqual([
+				{ source: "@media x{a{b:url(c)}}", name: "media", value: null, block: "{a{b:url(c)}}", rules: 1 },
+				{ source: "url(c)", name: null, value: "c", block: null, rules: 0 },
+				{ source: "@import 'd'", name: "import", value: null, block: null, rules: 0 }
+			]);
+			const html = fixture("html", "source-processor-node-path-reads-every-part-of-a-node-as-a-start-end-range");
+			/** @type {Record<string, unknown>[]} */
+			const htmlSeen = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], (path) => {
+					const content = path.rangeOf(HtmlPart.content);
+					if (content === null) return;
+					htmlSeen.push({
+						source: path.source(...path.range()),
+						name: path.source(.../** @type {[number, number]} */ (path.rangeOf(HtmlPart.name))),
+						content: path.source(...content)
+					});
+				})
+				.process(html);
+			expect(htmlSeen).toEqual([
+				{ source: "<div id=a>x</div>", name: "div", content: "x" },
+				{ source: "<p>y<br>", name: "p", content: "y<br>" },
+				{ source: "<br>", name: "br", content: "" },
+				{ source: "<p>z", name: "p", content: "z" }
+			]);
+		});
+
+		it("reads every position as numbers too, and the children as an array", () => {
+			/** @type {string[]} */
+			const differ = [];
+			/** @type {Record<number, (path: import("../../lib/css/syntax-parser").CssPath) => void>} */
+			const css = {};
+			for (const type of Object.values(CssNodeType)) {
+				css[type] = (path) => {
+					const range = path.range();
+					const children = [];
+					for (let i = 0; i < path.childCount(); i++) children.push(path.child(i));
+					if (
+						path.start() !== range[0] ||
+						path.end() !== range[1] ||
+						JSON.stringify(path.children()) !== JSON.stringify(children)
+					) {
+						differ.push(path.source());
+					}
+					for (const part of Object.values(CssPart)) {
+						const r = path.rangeOf(part);
+						const start = path.startOf(part);
+						const end = path.endOf(part);
+						if (r === null ? start !== -1 || end !== -1 : start !== r[0] || end !== r[1]) {
+							differ.push(`${path.source()} ${part}`);
+						}
+					}
+				};
+			}
+			new CssSourceProcessor()
+				.use(css)
+				.process(fixture("css", "source-processor-node-path-reads-every-position-as-numbers-too-and-the-children"));
+			/** @type {Record<number, (path: import("../../lib/html/syntax-parser").HtmlPath) => void>} */
+			const html = {};
+			for (const type of Object.values(HtmlNodeType)) {
+				html[type] = (path) => {
+					const range = path.range();
+					const children = [];
+					for (let i = 0; i < path.childCount(); i++) children.push(path.child(i));
+					if (
+						path.start() !== range[0] ||
+						path.end() !== range[1] ||
+						JSON.stringify(path.children()) !== JSON.stringify(children)
+					) {
+						differ.push(path.source());
+					}
+					const nodes = [path.node];
+					for (let i = 0; i < path.fieldCount(HtmlField.attributes); i++) {
+						nodes.push(path.field(i, HtmlField.attributes));
+					}
+					for (const n of nodes) {
+						for (const part of Object.values(HtmlPart)) {
+							const r = path.rangeOf(part, n);
+							const start = path.startOf(part, n);
+							const end = path.endOf(part, n);
+							if (r === null ? start !== -1 || end !== -1 : start !== r[0] || end !== r[1]) {
+								differ.push(`${path.source(n)} ${part}`);
+							}
+						}
+					}
+					expect(path.children(-1)).toEqual([]);
+				};
+			}
+			new HtmlSourceProcessor()
+				.use(html)
+				.process(fixture("html", "source-processor-node-path-reads-every-position-as-numbers-too-and-the-children"));
+			expect(differ).toEqual([]);
+		});
+
+		it("reads a streamed block's start in its rule's enter", () => {
+			const css = fixture("css", "source-processor-node-path-reads-a-streamed-block-s-start-in-its-rule-s-enter");
+			/** @type {number[]} */
+			const starts = [];
+			new CssSourceProcessor()
+				.use([CssNodeType.AtRule], (path) => {
+					starts.push(path.startOf(CssPart.block));
+				})
+				.process(css);
+			expect(starts).toEqual([css.indexOf("{")]);
+		});
+
+		it("ends a raw-text body at its end tag, attributes and all, when text is skipped", () => {
+			/** @type {(string | null)[]} */
+			const bodies = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], (path) => {
+					if (path.name() !== "style") return;
+					bodies.push(path.source(path.startOf(HtmlPart.content), path.endOf(HtmlPart.content)));
+				})
+				.process(fixture("html", "source-processor-node-path-ends-a-raw-text-body-at-its-end-tag-attributes-and"), { skip: { text: true } });
+			expect(bodies).toEqual(["a{}", "", "b{}"]);
+		});
+
+		it("ends an html element with the end tag naming it, whichever path closes it", () => {
+			// `</b>` and `</a>` go through the adoption agency, `</span>` through the
+			// generic end tag, `</div>` and `</li>` through their own rules, and the
+			// second `<b>` is closed by its parent's end tag instead.
+			const html = fixture("html", "source-processor-node-path-ends-an-html-element-with-the-end-tag-naming-it");
+			/** @type {string[]} */
+			const seen = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], (path) => {
+					if (path.parent !== null && path.name(path.parent) === "body") return;
+					if (path.name() === "html" || path.name() === "head" || path.name() === "body") {
+						return;
+					}
+					seen.push(path.source());
+				})
+				.process(html);
+			expect(seen).toEqual([
+				"<b>b</b>",
+				"<a>a</a>",
+				"<span>s</span>",
+				"<li>l</li>",
+				"<p><b>z</p>",
+				"<b>z"
+			]);
+		});
+
+		it("ends a foreign element with the end tag naming it", () => {
+			const html =
+				fixture("html", "source-processor-node-path-ends-a-foreign-element-with-the-end-tag-naming-it");
+			/** @type {string[]} */
+			const seen = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], (path) => {
+					if (path.flag(HtmlFlag.svg) || path.flag(HtmlFlag.mathml)) seen.push(path.source());
+				})
+				.process(html);
+			expect(seen).toEqual([
+				html,
+				'<marker><path d="x"/><b-c></b-c></marker>',
+				'<path d="x"/>',
+				"<b-c></b-c>",
+				"<script></script>"
+			]);
+		});
+
+		it("answers empty for a css node without a name or value", () => {
+			/** @type {[number, string, [number, number] | null, string | number][]} */
+			const seen = [];
+			new CssSourceProcessor()
+				.use(
+					[CssNodeType.QualifiedRule, CssNodeType.Ident, CssNodeType.SimpleBlock],
+					(path) => {
+						seen.push([
+							path.type(),
+							path.name(),
+							// @ts-expect-error none of these has a name
+							path.rangeOf(CssPart.name),
+							path.value()
+						]);
+					}
+				)
+				.process(fixture("css", "source-processor-node-path-answers-empty-for-a-css-node-without-a-name-or-value"));
+			expect(seen).toEqual([
+				[CssNodeType.QualifiedRule, "", null, ""],
+				[CssNodeType.Ident, "", null, "a"],
+				// A simple block's value is its opening bracket.
+				[CssNodeType.SimpleBlock, "", null, "["],
+				[CssNodeType.Ident, "", null, "b"]
+			]);
+		});
+
+		it("reads css structure through fields and flags", () => {
+			const css =
+				fixture("css", "source-processor-node-path-reads-css-structure-through-fields-and-flags");
+			/** @type {unknown[]} */
+			const seen = [];
+			new CssSourceProcessor()
+				.use(
+					[
+						CssNodeType.AtRule,
+						CssNodeType.QualifiedRule,
+						CssNodeType.Declaration
+					],
+					(path) => {
+						/**
+						 * @param {import("../../lib/css/syntax-parser").CssListField} field a field
+						 * @returns {string[]} each item's source
+						 */
+						const items = (field) => {
+							/** @type {string[]} */
+							const out = [];
+							for (let i = 0, n = path.fieldCount(field); i < n; i++) {
+								out.push(path.source(path.field(i, field)).trim());
+							}
+							expect(path.field(path.fieldCount(field), field)).toBe(0);
+							return out;
+						};
+						const width = path.fieldNamed(CssField.declarations, "width");
+						seen.push([
+							path.type(),
+							path.name(),
+							items(CssField.prelude).join(""),
+							items(CssField.value).join(""),
+							items(CssField.declarations),
+							items(CssField.rules).length,
+							/** @type {unknown} */ (width) === 0 ? null : path.source(width),
+							path.fieldNamed(CssField.declarations, "margin"),
+							path.flag(CssFlag.important)
+						]);
+					}
+				)
+				.process(css);
+			expect(seen).toEqual([
+				[CssNodeType.AtRule, "import", '"a.css"', "", [], 0, null, 0, false],
+				[CssNodeType.AtRule, "media", "screen", "", [], 2, null, 0, false],
+				[
+					CssNodeType.QualifiedRule,
+					"",
+					"a",
+					"",
+					["color: red !important", "width: 1px"],
+					0,
+					"width: 1px ",
+					0,
+					false
+				],
+				[CssNodeType.Declaration, "color", "", "red", [], 0, null, 0, true],
+				[CssNodeType.Declaration, "width", "", "1px", [], 0, null, 0, false],
+				[CssNodeType.QualifiedRule, "", "b", "", [], 0, null, 0, false],
+				[CssNodeType.QualifiedRule, "", "c", "", ["d: f(1)"], 0, null, 0, false],
+				[CssNodeType.Declaration, "d", "", "f(1)", [], 0, null, 0, false]
+			]);
+		});
+
+		it("reads html structure through fields and flags", () => {
+			const html = fixture("html", "source-processor-node-path-reads-html-structure-through-fields-and-flags");
+			/** @type {unknown[]} */
+			const seen = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], (path) => {
+					const name = path.name();
+					if (name !== "p" && name !== "br" && name !== "template") return;
+					const b = path.fieldNamed(HtmlField.attributes, "b");
+					const content = path.field(0, HtmlField.content);
+					seen.push([
+						name,
+						path.fieldCount(HtmlField.attributes),
+						path.name(path.field(0, HtmlField.attributes)),
+						path.field(2, HtmlField.attributes),
+						b === 0 ? null : path.source(b),
+						path.fieldNamed(HtmlField.attributes, "c"),
+						path.flag(HtmlFlag.selfClosing),
+						content === 0 ? 0 : path.type(content),
+						path.fieldCount(HtmlField.content)
+					]);
+					if (name === "p") {
+						const a = path.field(0, HtmlField.attributes);
+						// An attribute has no parts: each read below fails to type-check too.
+						// @ts-expect-error no attributes
+						expect(path.fieldCount(HtmlField.attributes, a)).toBe(0);
+						// @ts-expect-error no attributes
+						expect(path.field(0, HtmlField.attributes, a)).toBe(0);
+						// @ts-expect-error no attributes
+						expect(path.fieldNamed(HtmlField.attributes, "x", a)).toBe(0);
+						// @ts-expect-error no flags
+						expect(path.flag(HtmlFlag.selfClosing, a)).toBe(false);
+						// @ts-expect-error no content
+						expect(path.field(0, HtmlField.content, a)).toBe(0);
+					}
+				})
+				.process(html);
+			expect(seen).toEqual([
+				["p", 2, "a", 0, "b", 0, false, 0, 0],
+				["br", 0, "", 0, null, 0, true, 0, 0],
+				["template", 0, "", 0, null, 0, false, HtmlNodeType.DocumentFragment, 1]
+			]);
+		});
+
+		it("answers fields and flags only for the node that owns them", () => {
+			/** @type {string[]} */
+			const flagged = [];
+			/** @type {Record<number, (path: import("../../lib/css/syntax-parser").CssPath) => void>} */
+			const visitors = {};
+			for (const type of Object.values(CssNodeType)) {
+				visitors[type] = (path) => {
+					if (path.type() !== CssNodeType.Declaration && path.flag(CssFlag.important)) {
+						flagged.push(path.source());
+					}
+				};
+			}
+			// The second rule's nodes reuse the first rule's ids.
+			new CssSourceProcessor()
+				.use(visitors)
+				.process(fixture("css", "source-processor-node-path-answers-fields-and-flags-only-for-the-node-that-owns"));
+			expect(flagged).toEqual([]);
+			/** @type {unknown[]} */
+			const css = [];
+			new CssSourceProcessor()
+				.use([CssNodeType.QualifiedRule], (path) => {
+					css.push(path.field(-1, CssField.declarations), path.field(-1, CssField.prelude));
+				})
+				.process(fixture("css", "source-processor-node-path-answers-fields-and-flags-only-for-the-node-that-owns-2"));
+			expect(css).toEqual([0, 0]);
+
+			new HtmlSourceProcessor().process(fixture("html", "source-processor-node-path-answers-fields-and-flags-only-for-the-node-that-owns"));
+			/** @type {unknown[]} */
+			const html = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Text], (path) => {
+					html.push(
+						// @ts-expect-error a text node has no attributes
+						path.fieldCount(HtmlField.attributes),
+						// @ts-expect-error a text node has no attributes
+						path.field(0, HtmlField.attributes),
+						// @ts-expect-error a text node has no attributes
+						path.fieldNamed(HtmlField.attributes, "a")
+					);
+				})
+				.use([HtmlNodeType.Element], (path) => {
+					if (path.name() === "p") html.push(path.field(-1, HtmlField.attributes));
+				})
+				.process(fixture("html", "source-processor-node-path-answers-fields-and-flags-only-for-the-node-that-owns-2"));
+			expect(html).toEqual([0, 0, 0, 0]);
+		});
+
+		it("types each visitor's path by the node types it visits", () => {
+			/** @type {unknown[]} */
+			const css = [];
+			new CssSourceProcessor()
+				.use([CssNodeType.QualifiedRule], (path) => {
+					const declaration = path.field(0, CssField.declarations);
+					css.push(
+						path.flag(CssFlag.important, declaration),
+						// @ts-expect-error a rule is never `!important`
+						path.flag(CssFlag.important),
+						// @ts-expect-error a declaration has no nested rules
+						path.fieldCount(CssField.rules, declaration),
+						// @ts-expect-error a rule's component values are its prelude
+						path.fieldCount(CssField.value),
+						// @ts-expect-error a qualified rule has no name
+						path.rangeOf(CssPart.name)
+					);
+				})
+				.use({
+					[CssNodeType.Ident]: (path) => {
+						// @ts-expect-error an ident has no value list
+						css.push(path.fieldCount(CssField.value));
+					}
+				})
+				.process(fixture("css", "source-processor-node-path-types-each-visitor-s-path-by-the-node-types-it-visits"));
+			expect(css).toEqual([true, false, 0, 0, null, 0, 0]);
+
+			/** @type {unknown[]} */
+			const html = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], (path) => {
+					const attribute = path.field(0, HtmlField.attributes);
+					if (attribute === 0) return;
+					html.push(
+						path.name(attribute),
+						// @ts-expect-error an attribute has no attributes
+						path.fieldCount(HtmlField.attributes, attribute),
+						// @ts-expect-error an attribute is never self-closing
+						path.flag(HtmlFlag.selfClosing, attribute),
+						// @ts-expect-error an attribute has no content
+						path.rangeOf(HtmlPart.content, attribute)
+					);
+				})
+				.use([HtmlNodeType.Comment, HtmlNodeType.Text], (path) => {
+					html.push(
+						// @ts-expect-error a comment or text has no attributes
+						path.fieldNamed(HtmlField.attributes, "a"),
+						// @ts-expect-error nor a template's content
+						path.field(0, HtmlField.content),
+						// @ts-expect-error nor a name
+						path.rangeOf(HtmlPart.name)
+					);
+				})
+				.process(fixture("html", "source-processor-node-path-types-each-visitor-s-path-by-the-node-types-it-visits"));
+			expect(html).toEqual(["a", 0, false, null, 0, 0, null]);
+		});
+
+		it("reads what one grammar has through the generic members", () => {
+			/** @type {unknown[]} */
+			const css = [];
+			new CssSourceProcessor()
+				.use([CssNodeType.Dimension, CssNodeType.Number], (path) => {
+					css.push([
+						path.source(),
+						path.name(),
+						path.type() === CssNodeType.Dimension
+							? path.source(.../** @type {[number, number]} */ (path.rangeOf(CssPart.name)))
+							: null,
+						path.flag(CssFlag.integer)
+					]);
+				})
+				.use([CssNodeType.Hash], (path) => {
+					css.push([path.source(), path.flag(CssFlag.id), path.within(CssNodeType.Declaration)]);
+				})
+				.use([CssNodeType.SimpleBlock], (path) => {
+					css.push([path.source(), path.value()]);
+				})
+				.use([CssNodeType.Declaration], (path) => {
+					css.push(path.textOf(CssPart.name));
+				})
+				.process(fixture("css", "source-processor-node-path-reads-what-one-grammar-has-through-the-generic"));
+			expect(css).toEqual([
+				["#a", true, false],
+				["[b]", "["],
+				"width",
+				["10px", "px", "px", true],
+				"margin",
+				["1.5em", "em", "em", false],
+				"z-index",
+				["2", "", null, true],
+				"color",
+				["#123", false, true]
+			]);
+
+			/** @type {unknown[]} */
+			const html = [];
+			const page = fixture("html", "source-processor-node-path-reads-what-one-grammar-has-through-the-generic");
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Doctype], (path) => {
+					html.push(
+						path.textOf(HtmlPart.publicId),
+						path.source(.../** @type {[number, number]} */ (path.rangeOf(HtmlPart.systemId))),
+						// @ts-expect-error a doctype has no start tag
+						path.rangeOf(HtmlPart.startTag)
+					);
+				})
+				.use([HtmlNodeType.Element], (path) => {
+					const start = path.rangeOf(HtmlPart.startTag);
+					const end = path.rangeOf(HtmlPart.endTag);
+					html.push([
+						path.name(),
+						start === null ? null : path.source(...start),
+						end === null ? null : path.source(...end),
+						path.flag(HtmlFlag.svg),
+						path.flag(HtmlFlag.mathml),
+						path.within(HtmlNodeType.Element)
+					]);
+				})
+				.use([HtmlNodeType.Text], (path) => {
+					// @ts-expect-error a text node has no identifiers
+					html.push(path.textOf(HtmlPart.publicId));
+				})
+				.process(page);
+			expect(html).toEqual([
+				"-//W3C//DTD HTML 4.01//EN",
+				"about:legacy",
+				null,
+				["html", null, null, false, false, false],
+				["head", null, null, false, false, true],
+				["body", null, null, false, false, true],
+				["p", "<p>", "</p>", false, false, true],
+				null,
+				["li", "<li>", null, false, false, true],
+				null,
+				["svg", "<svg>", "</svg>", true, false, true],
+				["path", "<path/>", null, true, false, true],
+				["math", "<math>", "</math>", false, true, true],
+				["mi", "<mi/>", null, false, true, true]
+			]);
+		});
+
+		it("answers null for a part a node does not have", () => {
+			/** @type {unknown[]} */
+			const html = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Doctype], (path) => {
+					const id = path.rangeOf(HtmlPart.publicId);
+					html.push(
+						id === null ? null : path.source(...id),
+						// @ts-expect-error a doctype's name is read with `name`
+						path.textOf(HtmlPart.name)
+					);
+				})
+				.use([HtmlNodeType.Element], (path) => {
+					if (path.name() !== "b") return;
+					html.push(
+						path.rangeOf(HtmlPart.startTag),
+						// @ts-expect-error an element's value has no position
+						path.rangeOf(HtmlPart.value),
+						path.field(1, HtmlField.content)
+					);
+				})
+				// The second `b` is the adoption agency's clone, so no tag of its own.
+				.process(fixture("html", "source-processor-node-path-answers-null-for-a-part-a-node-does-not-have"));
+			expect(html).toEqual(["a", null, [26, 29], null, 0, null, null, 0]);
+
+			/** @type {unknown[]} */
+			const css = [];
+			new CssSourceProcessor()
+				.use([CssNodeType.Dimension], (path) => {
+					css.push(path.name(), _blockTokenOf(path.node));
+				})
+				// An escape the input ends inside is U+FFFD (CSS Syntax §4.3.7).
+				.process(fixture("css", "css-syntax-path-reads-on-every-node-kind-reads-numeric-values-units-and-integer-2"));
+			expect(css).toEqual(["p\uFFFD", ""]);
+		});
+
+		it("hands every visitor the run's state, typed by the processor", () => {
+			/** @type {import("../../lib/css/syntax").SourceProcessor<{ values: string[] }>} */
+			const css = new CssSourceProcessor();
+			css
+				.use([CssNodeType.Ident], (path) => {
+					path.state.values.push(String(path.value()));
+					// @ts-expect-error the state has no `count`
+					path.state.count = 1;
+				})
+				.use({
+					[CssNodeType.Dimension]: (path) => {
+						path.state.values.push(path.source());
+					}
+				});
+			/** @type {{ values: string[] }} */
+			const state = { values: [] };
+			css.process(fixture("css", "source-processor-node-path-hands-every-visitor-the-run-s-state-typed-by-the"), { state });
+			expect(state.values).toEqual(["a", "c", "1px"]);
+			// Only type-checked: a state of another shape is refused.
+			const wrongState = () =>
+				// @ts-expect-error a state of another shape
+				css.process(fixture("css", "source-processor-merging-adjacent-style-drops-a-run-s-first-element-only-where-4"), { state: { values: 1 } });
+			expect(typeof wrongState).toBe("function");
+
+			/** @type {import("../../lib/html/syntax").SourceProcessor<{ paragraphs: number }>} */
+			const html = new HtmlSourceProcessor();
+			/** @type {unknown[]} */
+			const seen = [];
+			html.use([HtmlNodeType.Element], (path) => {
+				if (path.name() !== "p") return;
+				const inner = { values: [] };
+				css.process(fixture("css", "source-processor-node-path-hands-every-visitor-the-run-s-state-typed-by-the-2"), { state: inner });
+				// A run of another language leaves this one's state as it found it.
+				seen.push(path.state === outer, inner.values.length);
+				path.state.paragraphs++;
+			});
+			const outer = { paragraphs: 0 };
+			html.process(fixture("html", "source-processor-node-path-hands-every-visitor-the-run-s-state-typed-by-the"), { state: outer });
+			expect(seen).toEqual([true, 1, true, 1]);
+			expect(outer.paragraphs).toBe(2);
+			const { A } = require("../../lib/html/syntax-parser");
+
+			// The run's state lives on the processor's own path; the language's
+			// path, which every processor reads through, never holds one.
+			expect(Object.prototype.hasOwnProperty.call(A, "state")).toBe(false);
+			/** @type {import("../../lib/html/syntax").SourceProcessor<{ paragraphs: number }>} */
+			const throwing = new HtmlSourceProcessor();
+			throwing.use([HtmlNodeType.Element], () => {
+				throw new Error("visitor");
+			});
+			expect(() => throwing.process(fixture("html", "source-processor-node-path-hands-every-visitor-the-run-s-state-typed-by-the-2"), { state: outer })).toThrow("visitor");
+			expect(Object.prototype.hasOwnProperty.call(A, "state")).toBe(false);
+		});
+
+		it("hands every printer the path its visitors get, state and all", () => {
+			const JavascriptSourceProcessor = require("../../lib/javascript/JavascriptSourceProcessor");
+			const { NodeType: JavascriptNodeType } = require("../../lib/javascript/syntax-parser");
+			const JS = fixture("javascript", "source-processor-node-path-hands-every-printer-the-path-its-visitors-get");
+
+			/** @type {[EXPECTED_ANY, string, number | undefined][]} processor, source, visited node type */
+			const runs = [
+				[new CssSourceProcessor(), CSS, CssNodeType.Ident],
+				[new HtmlSourceProcessor(), HTML, HtmlNodeType.Element],
+				[new JavascriptSourceProcessor(), JS, JavascriptNodeType.Identifier],
+				// No visitors: the JavaScript walk takes its print-only branch.
+				[new JavascriptSourceProcessor(), JS, undefined]
+			];
+			for (const [processor, source, type] of runs) {
+				/** @type {Set<unknown>} */
+				const visitorPaths = new Set();
+				/** @type {Set<unknown>} */
+				const printerPaths = new Set();
+				/** @type {unknown[]} */
+				const printerStates = [];
+				const printer = processor._printer || processor._loadPrinter();
+				processor._printer = (
+					/** @type {{ state: unknown }} */ path,
+					/** @type {unknown} */ writer
+				) => {
+					printerPaths.add(path);
+					printerStates.push(path.state);
+					return printer(path, writer);
+				};
+				if (type !== undefined) {
+					processor.use([type], (/** @type {unknown} */ path) => {
+						visitorPaths.add(path);
+					});
+				}
+				const state = { run: 1 };
+				processor.process(source, { mode: "minify", state });
+				expect(printerStates.length).toBeGreaterThan(0);
+				expect(printerStates.every((s) => s === state)).toBe(true);
+				expect(printerPaths.size).toBe(1);
+				if (type !== undefined) {
+					expect(visitorPaths.size).toBe(1);
+					expect([...visitorPaths][0]).toBe([...printerPaths][0]);
+				}
+			}
+		});
+
+		it("knows a streamed block's ancestors until it closes", () => {
+			let inside = 0;
+			/** @type {boolean[]} */
+			const after = [];
+			new CssSourceProcessor()
+				.use([CssNodeType.Dimension], (path) => {
+					if (path.source() === "0px") {
+						after.push(path.within(CssNodeType.AtRule));
+					} else if (
+						path.within(CssNodeType.Declaration) &&
+						path.within(CssNodeType.QualifiedRule) &&
+						path.within(CssNodeType.AtRule)
+					) {
+						inside++;
+					}
+				})
+				.process(fixture("css", "source-processor-node-path-knows-a-streamed-block-s-ancestors-until-it-closes"));
+			expect(inside).toBe(1800);
+			expect(after).toEqual([false]);
+		});
+
+		it("reads a css part's source text, escapes as written", () => {
+			/** @type {(string | null)[]} */
+			const seen = [];
+			new CssSourceProcessor()
+				.use([CssNodeType.Declaration, CssNodeType.QualifiedRule], (path) => {
+					seen.push(
+						path.textOf(CssPart.name),
+						path.textOf(CssPart.value),
+						path.textOf(CssPart.block)
+					);
+				})
+				.process(
+					fixture("css", "source-processor-node-path-reads-a-css-part-s-source-text-escapes-as-written")
+				);
+			expect(seen).toEqual([
+				null,
+				null,
+				"{c\\6flor:rgb(1 2 3) !important}",
+				"c\\6flor",
+				"rgb(1 2 3)",
+				null
+			]);
+			/** @type {(string | null)[]} */
+			const names = [];
+			new CssSourceProcessor()
+				.use([CssNodeType.Declaration], (path) => {
+					names.push(path.textOf(CssPart.name));
+				})
+				.process(
+					fixture("css", "source-processor-node-path-reads-a-css-part-s-source-text-escapes-as-written-2")
+				);
+			// The source as given, before the parse reads a NUL as U+FFFD.
+			expect(names).toEqual(["co\u0000lor"]);
+			// A direct parse reads it as given too.
+			const { A, Field, parseAStylesheet } = require("../../lib/css/syntax").parser;
+			const rule = A.field(
+				0,
+				Field.rules,
+				parseAStylesheet(
+					fixture("css", "source-processor-node-path-reads-a-css-part-s-source-text-escapes-as-written-2")
+				)
+			);
+			const declaration = A.field(0, Field.declarations, rule);
+			expect([A.textOf(CssPart.name, declaration), A.source(declaration)]).toEqual([
+				"co\u0000lor",
+				"co\u0000lor:red"
+			]);
+		});
+
+		it("reads an html node's ancestors along its parent links", () => {
+			/** @type {string[][]} */
+			const chains = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], (path) => {
+					if (path.name() !== "b") return;
+					const chain = [];
+					for (let level = 0; path.ancestor(level) !== 0; level++) {
+						chain.push(path.name(path.ancestor(level)));
+					}
+					expect(path.ancestor(0)).toBe(path.parent);
+					chains.push(chain);
+				})
+				.process(
+					fixture("html", "source-processor-node-path-reads-an-html-node-s-ancestors-along-its-parent-links")
+				);
+			expect(chains).toEqual([["p", "div", "body", "html", ""]]);
+		});
+
+		it("prints what an html visitor replaced or removed", () => {
+			/**
+			 * @param {string} html the source
+			 * @param {"enter" | "exit"} event when the visitor runs
+			 * @param {(path: import("../../lib/html/syntax-parser").HtmlPath) => void} visit the visitor
+			 * @returns {string} the minified print
+			 */
+			const print = (html, event, visit) =>
+				/** @type {{ code: string }} */ (
+					new HtmlSourceProcessor()
+						.use({
+							[HtmlNodeType.Element]: { [event]: visit },
+							[HtmlNodeType.Text]: { [event]: visit }
+						})
+						.process(html, { mode: "minify" })
+				).code;
+			const html = fixture("html", "source-processor-node-path-prints-what-an-html-visitor-replaced-or-removed");
+			expect(
+				print(html, "enter", (path) => {
+					if (path.name() === "p") path.replace("<q>Q</q>");
+					if (path.name() === "div") return;
+					if (path.name() === "i") path.remove();
+				})
+			).toBe("<div><q>Q</q>b<br></div>");
+			expect(
+				print(html, "exit", (path) => {
+					if (path.value() === "b") path.replace("B");
+					if (path.name() === "br") path.remove();
+					// Printed in pieces already, it keeps what it printed.
+					if (path.name() === "div") path.replace("<span></span>");
+				})
+			).toBe("<div><p>a</p>B<i>c</i></div>");
+			expect(
+				print(fixture("html", "source-processor-node-path-prints-what-an-html-visitor-replaced-or-removed-2"), "enter", (path) => {
+					if (path.name() === "div") path.replace("<span></span>");
+				})
+			).toBe("<span></span>");
+			// The document composes whole, so the replacement is all it prints.
+			expect(
+				/** @type {{ code: string }} */ (
+					new HtmlSourceProcessor()
+						.use({
+							[HtmlNodeType.Document]: {
+								enter: (path) => path.replace("<main>b</main>")
+							}
+						})
+						.process(
+							fixture("html", "source-processor-node-path-prints-what-an-html-visitor-replaced-or-removed-2"),
+							{ mode: "minify" }
+						)
+				).code
+			).toBe("<main>b</main>");
+			// A print the read-back check would hand back as the source keeps its edits.
+			expect(
+				print(
+					fixture("html", "source-processor-node-path-prints-what-an-html-visitor-replaced-or-removed-4"),
+					"enter",
+					(path) => {
+						if (path.name() === "div") path.replace("<span>b</span>");
+					}
+				)
+			).toBe("x<table></table><span>b</span>");
+			expect(
+				/** @type {{ code: string }} */ (
+					new HtmlSourceProcessor()
+						.use([HtmlNodeType.Text], (path) => path.replace("b"))
+						.process(
+							fixture("html", "source-processor-node-path-prints-what-an-html-visitor-replaced-or-removed-5"),
+							{ mode: "minify", fragmentContext: "select" }
+						)
+				).code
+			).toBe("<option>b");
+			// A walk that prints nothing has nothing to replace.
+			expect(
+				new HtmlSourceProcessor()
+					.use([HtmlNodeType.Element], (path) => path.remove())
+					.process(fixture("html", "source-processor-node-path-prints-what-an-html-visitor-replaced-or-removed-3"))
+			).toBeUndefined();
+		});
+
+		it("reads html attributes as nodes through the shared members", () => {
+			const input = fixture("html", "source-processor-node-path-reads-html-attributes-as-nodes-through-the-shared");
+			/** @type {Record<string, unknown>[]} */
+			const seen = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], (path) => {
+					if (path.name() !== "a") return;
+					for (
+						let i = 0, a = path.field(0, HtmlField.attributes);
+						a !== 0;
+						a = path.field(++i, HtmlField.attributes)
+					) {
+						const valueRange = path.rangeOf(HtmlPart.value, a);
+						seen.push({
+							type: path.type(a),
+							name: path.name(a),
+							value: path.value(a),
+							source: path.source(a),
+							written: valueRange === null ? null : path.source(...valueRange),
+							nameSource: path.source(
+								.../** @type {[number, number]} */ (path.rangeOf(HtmlPart.name, a))
+							),
+							loc: path.loc(a).slice(0, 2)
+						});
+					}
+					expect(
+						path.field(path.fieldCount(HtmlField.attributes), HtmlField.attributes)
+					).toBe(0);
+					expect(path.fieldNamed(HtmlField.attributes, "id")).toBe(0);
+					expect(path.name(path.fieldNamed(HtmlField.attributes, "title"))).toBe("title");
+				})
+				.process(input);
+			expect(seen).toEqual([
+				{
+					type: HtmlNodeType.Attribute,
+					name: "href",
+					value: "/x?a&b",
+					source: 'href="/x?a&amp;b"',
+					written: "/x?a&amp;b",
+					nameSource: "href",
+					loc: [2, 3]
+				},
+				{
+					type: HtmlNodeType.Attribute,
+					name: "title",
+					value: "t",
+					source: "title=t",
+					written: "t",
+					nameSource: "title",
+					loc: [2, 21]
+				},
+				{
+					type: HtmlNodeType.Attribute,
+					name: "data-x",
+					value: "",
+					source: "data-x",
+					written: null,
+					nameSource: "data-x",
+					loc: [2, 29]
+				}
+			]);
+		});
+
+		it("reads the html root and a template's content at index 0", () => {
+			/** @type {[number, number | null, number][]} */
+			const seen = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Document, HtmlNodeType.DocumentFragment], (path) => {
+					seen.push([path.type(), path.parent, path.index]);
+				})
+				.process(fixture("html", "source-processor-node-path-reads-the-html-root-and-a-template-s-content-at-index"));
+			expect(seen).toHaveLength(2);
+			expect(seen[0]).toEqual([HtmlNodeType.Document, null, 0]);
+			expect(seen[1][0]).toBe(HtmlNodeType.DocumentFragment);
+			expect(seen[1][1]).not.toBeNull();
+			expect(seen[1][2]).toBe(0);
+		});
+
+		it("reads css nodes through the shared members", () => {
+			const input = fixture("css", "source-processor-node-path-reads-css-nodes-through-the-shared-members-2");
+			// Leaves reuse ids that held lists in this parse, so a leaf reading
+			// its id's leftover list slots would report children.
+			new CssSourceProcessor().process(fixture("css", "source-processor-node-path-reads-css-nodes-through-the-shared-members"));
+			/** @type {Record<string, unknown>[]} */
+			const seen = [];
+			/** @type {string[]} */
+			const args = [];
+			new CssSourceProcessor()
+				.use({
+					[CssNodeType.Function]: (path) => {
+						for (let i = 0; i < path.childCount(); i++) {
+							args.push(path.source(path.child(i)));
+						}
+						expect(path.child(path.childCount())).toBe(0);
+					},
+					[CssNodeType.Number]: (path) => {
+						seen.push(describeNode(path, input));
+					}
+				})
+				.process(input);
+			expect(args).toEqual(["1", ",", " ", "2", ",", "\n", "3"]);
+			expect(seen.map((node) => node.source)).toEqual(["1", "2", "3"]);
+			for (const node of seen) {
+				expect(node.loc).toEqual(node.expectedLoc);
+				expect(node.source).toBe(node.slice);
+				expect(node.atIndex).toBe(true);
+				expect(node.childCount).toBe(0);
+				expect(node.children).toEqual([]);
+			}
+			expect(seen.map((node) => node.index)).toEqual([0, 3, 6]);
+			expect(seen[2].loc).toEqual([3, 0, 3, 1]);
+		});
+	});
+
+	describe("stop", () => {
+		it("ends a css walk: no later visitor, exit or comment fires", () => {
+			/** @type {string[]} */
+			const log = [];
+			const processor = new CssSourceProcessor()
+				.use({
+					[CssNodeType.QualifiedRule]: {
+						enter: () => log.push("rule"),
+						exit: () => log.push("rule exit")
+					},
+					[CssNodeType.Declaration]: (path) => {
+						log.push(path.name());
+						if (path.name() === "b") path.stop();
+					},
+					[CssNodeType.Comment]: () => log.push("comment")
+				})
+				.use({
+					[CssNodeType.Declaration]: (path) => log.push(`second ${path.name()}`)
+				});
+			processor.process(fixture("css", "source-processor-stop-ends-a-css-walk-no-later-visitor-exit-or-comment-fires"));
+			expect(log).toEqual(["rule", "a", "second a", "b"]);
+			log.length = 0;
+			processor.process(fixture("css", "source-processor-stop-ends-a-css-walk-no-later-visitor-exit-or-comment-fires-2"));
+			expect(log).toEqual(["rule", "a", "second a", "rule exit", "comment"]);
+		});
+
+		it("stops css visitors but still prints the whole output", () => {
+			const css = fixture("css", "source-processor-stop-stops-css-visitors-but-still-prints-the-whole-output");
+			let fired = 0;
+			const { code } = new CssSourceProcessor()
+				.use({
+					[CssNodeType.Declaration]: (path) => {
+						fired++;
+						path.stop();
+					}
+				})
+				.process(css, { mode: "minify" });
+			expect(fired).toBe(1);
+			expect(code).toBe(
+				new CssSourceProcessor().process(css, { mode: "minify" }).code
+			);
+		});
+
+		it("ends an html walk, and the next parse starts afresh", () => {
+			/** @type {string[]} */
+			const log = [];
+			const processor = new HtmlSourceProcessor().use([HtmlNodeType.Element], {
+				enter: (path) => {
+					log.push(path.name());
+					if (path.name() === "base") path.stop();
+				},
+				exit: (path) => log.push(`/${path.name()}`)
+			});
+			processor.process(fixture("html", "source-processor-stop-ends-an-html-walk-and-the-next-parse-starts-afresh"));
+			expect(log).toEqual(["html", "head", "base"]);
+			log.length = 0;
+			processor.process(fixture("html", "html-syntax-the-facade-holds-no-printer-until-something-prints"));
+			expect(log).toEqual([
+				"html",
+				"head",
+				"/head",
+				"body",
+				"p",
+				"/p",
+				"/body",
+				"/html"
+			]);
+		});
+
+		it("ends a streamed html walk mid-parse", () => {
+			// Past the node count where the walk streams during tree construction.
+			const html = fixture("html", "source-processor-stop-ends-a-streamed-html-walk-mid-parse");
+			let seen = 0;
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], (path) => {
+					if (path.name() === "li" && ++seen === 10) path.stop();
+				})
+				.process(html);
+			expect(seen).toBe(10);
+			let total = 0;
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], (path) => {
+					if (path.name() === "li") total++;
+				})
+				.process(html);
+			expect(total).toBe(40000);
+		});
+
+		it("stops html visitors but still prints the whole output", () => {
+			const html = fixture("html", "source-processor-stop-stops-html-visitors-but-still-prints-the-whole-output");
+			/** @type {string[]} */
+			const log = [];
+			const { code } = new HtmlSourceProcessor()
+				.use([HtmlNodeType.Element], {
+					enter: (path) => {
+						log.push(path.name());
+						if (path.name() === "div") path.stop();
+					},
+					exit: (path) => log.push(`/${path.name()}`)
+				})
+				.process(html, { mode: "minify" });
+			expect(log).toEqual(["html", "head", "/head", "body", "div"]);
+			expect(code).toBe(
+				new HtmlSourceProcessor().process(html, { mode: "minify" }).code
+			);
+		});
+	});
+
+	describe("use with an array of node types", () => {
+		it("registers one visitor for every listed type, in each language", () => {
+			/** @type {string[]} */
+			const css = [];
+			new CssSourceProcessor()
+				.use([CssNodeType.Number, CssNodeType.Dimension], (path) =>
+					css.push(path.source())
+				)
+				.process(fixture("css", "source-processor-use-with-an-array-of-node-types-registers-one-visitor-for-every"));
+			expect(css).toEqual(["1px", "2", "3em"]);
+			/** @type {string[]} */
+			const html = [];
+			new HtmlSourceProcessor()
+				.use([HtmlNodeType.Text, HtmlNodeType.Comment], {
+					exit: (path) => html.push(path.source())
+				})
+				.process(fixture("html", "source-processor-use-with-an-array-of-node-types-registers-one-visitor-for-every"));
+			expect(html).toEqual(["a", "<!--b-->", "c"]);
+		});
+
+		it("requires a visitor", () => {
+			expect(() =>
+				new CssSourceProcessor().use(
+					[CssNodeType.Number],
+					/** @type {EXPECTED_ANY} */ (undefined)
+				)
+			).toThrow(TypeError);
 		});
 	});
 
@@ -357,7 +1717,7 @@ describe("SourceProcessor", () => {
 						seen.push(path.name());
 					}
 				})
-				.process("a{color:red;top:0}", { mode: "minify" });
+				.process(fixture("css", "css-syntax-source-processor-replacing-a-node-removes-a-node-in-an-enter-visitor"), { mode: "minify" });
 			expect(seen).toEqual(["color", "top"]);
 			expect(result.code).toBe("a{color:red;top:0}");
 		});
@@ -368,10 +1728,10 @@ describe("SourceProcessor", () => {
 			new HtmlSourceProcessor()
 				.use({
 					[HtmlNodeType.Element]: (path) => {
-						seen.push(path.tagName());
+						seen.push(path.name());
 					}
 				})
-				.process("<div><p>x</p></div>");
+				.process(fixture("html", "source-processor-printing-in-pieces-drops-a-last-child-s-end-tag-only-when-the-3"));
 			expect(seen).toEqual(["html", "head", "body", "div", "p"]);
 		});
 
@@ -385,7 +1745,7 @@ describe("SourceProcessor", () => {
 						exit: () => order.push("exit")
 					}
 				})
-				.process("a{color:red}");
+				.process(fixture("css", "css-syntax-minify-the-value-transforms-rejection-paths-a-named-color-the-14"));
 			expect(order).toEqual(["enter", "exit"]);
 		});
 
@@ -398,20 +1758,14 @@ describe("SourceProcessor", () => {
 	describe("empty and degenerate input", () => {
 		for (const [language, Processor] of LANGUAGES) {
 			it(`${language} prints empty input without failing`, () => {
-				const { code } = new Processor().process("", { mode: "minify" });
+				const { code } = new Processor().process(fixture("css", "source-processor-empty-and-degenerate-input-prints-empty-input-without-failing"), { mode: "minify" });
 				expect(typeof code).toBe("string");
 			});
 		}
 
-		it("css prints a stylesheet that is only a comment", () => {
-			expect(
-				new CssSourceProcessor().process("/* c */", { mode: "minify" }).code
-			).toBe("");
-		});
-
 		it("css keeps a license comment", () => {
 			expect(
-				new CssSourceProcessor().process("/*! keep */a{b:c}", {
+				new CssSourceProcessor().process(fixture("css", "source-processor-empty-and-degenerate-input-css-keeps-a-license-comment"), {
 					mode: "minify"
 				}).code
 			).toContain("/*! keep */");

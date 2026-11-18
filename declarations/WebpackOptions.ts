@@ -64,13 +64,19 @@ export type NonNegativeNumber = number;
 export type PositiveNumber = number;
 
 /**
+ * Where files may be written, copied and cleaned outside of 'output.path'. 'true' allows anywhere, 'false' nowhere, and a list allows only inside those directories. When unset, assets plugins emit there are still written (refused with 'experiments.futureDefaults'), while 'output.copy' and 'output.clean' stay inside 'output.path'.
+ * @since 5.113.0
+ */
+export type AllowOutside =
+	| Array</** Absolute path of a directory outside of 'output.path' where files may be written, copied and cleaned. */ AbsolutePath>
+	| boolean;
+
+/**
  * Set the value of `require.amd` and `define.amd`. Or disable AMD support.
  */
 export type Amd =
 	| /** You can pass `false` to disable AMD support. */ false
-	| /** You can pass an object to set the value of `require.amd` and `define.amd`. */ {
-			[key: string]: any;
-	  };
+	| /** You can pass an object to set the value of `require.amd` and `define.amd`. */ import("../lib/fs/fs").JsonObject;
 
 /**
  * Add a container for define/require functions in the AMD module.
@@ -300,6 +306,7 @@ export type Clean = boolean | CleanOptions;
 
 /**
  * Advanced options for cleaning assets.
+ * @publishes plugins/output/CleanOptions
  */
 export interface CleanOptions {
 	/**
@@ -309,7 +316,11 @@ export interface CleanOptions {
 	/**
 	 * Keep these assets.
 	 */
-	keep?: RegExp | RelativePath | import("../lib/output/CleanPlugin").KeepFn;
+	keep?:
+		| RegExp
+		| RelativePath
+		| import("../lib/output/CleanPlugin").KeepFn
+		| GlobCondition;
 }
 
 /**
@@ -534,6 +545,11 @@ export interface CssAutoOrModuleParserOptions {
 	 */
 	namedExports?: CssParserNamedExports;
 	/**
+	 * Report each CSS parse error (CSS Syntax Level 3 §4, §5) the stylesheet holds: a build error where end of input cuts a token or rule short, a build warning for one the parser reads past. Off by default.
+	 * @since 5.113.0
+	 */
+	parseErrors?: CssParserParseErrors;
+	/**
 	 * Enable strict pure mode: every selector must contain at least one local class or id selector.
 	 */
 	pure?: CssParserPure;
@@ -703,6 +719,11 @@ export interface CssModuleParserOptions {
 	 */
 	namedExports?: CssParserNamedExports;
 	/**
+	 * Report each CSS parse error (CSS Syntax Level 3 §4, §5) the stylesheet holds: a build error where end of input cuts a token or rule short, a build warning for one the parser reads past. Off by default.
+	 * @since 5.113.0
+	 */
+	parseErrors?: CssParserParseErrors;
+	/**
 	 * Enable/disable `url()`/`image-set()`/`src()`/`image()` functions handling.
 	 */
 	url?: CssParserUrl;
@@ -818,6 +839,11 @@ export interface CssParserOptions {
 	 */
 	namedExports?: CssParserNamedExports;
 	/**
+	 * Report each CSS parse error (CSS Syntax Level 3 §4, §5) the stylesheet holds: a build error where end of input cuts a token or rule short, a build warning for one the parser reads past. Off by default.
+	 * @since 5.113.0
+	 */
+	parseErrors?: CssParserParseErrors;
+	/**
 	 * Enable/disable `url()`/`image-set()`/`src()`/`image()` functions handling.
 	 */
 	url?: CssParserUrl;
@@ -827,6 +853,12 @@ export interface CssParserOptions {
 	 */
 	urlHints?: UrlHints;
 }
+
+/**
+ * Report each CSS parse error (CSS Syntax Level 3 §4, §5) the stylesheet holds: a build error where end of input cuts a token or rule short, a build warning for one the parser reads past. Off by default.
+ * @since 5.113.0
+ */
+export type CssParserParseErrors = boolean;
 
 /**
  * Enable strict pure mode: every selector must contain at least one local class or id selector.
@@ -900,6 +932,7 @@ export type Dotenv =
 
 /**
  * Options for Dotenv plugin.
+ * @publishes plugins/define/DotenvPluginOptions
  */
 export interface DotenvPluginOptions {
 	/**
@@ -1884,6 +1917,17 @@ export type GeneratorOptionsByModuleType = GeneratorOptionsByModuleTypeKnown &
 	GeneratorOptionsByModuleTypeUnknown;
 
 /**
+ * Match glob patterns against the value, `!` in front of a pattern excludes it. Path separators are normalized to `/` on every OS, and a relative pattern matches at any depth.
+ * @since 5.112.0
+ */
+export interface GlobCondition {
+	/**
+	 * Glob patterns to match.
+	 */
+	glob: RuleSetGlobs | RuleSetGlob;
+}
+
+/**
  * An expression which is used to address the global object/scope in runtime code.
  */
 export type GlobalObject = NonEmptyString;
@@ -1927,6 +1971,13 @@ export type HotUpdateMainFilename = RelativePath;
  * Specifies the filename template of non-initial output html files on disk. You must **not** specify an absolute path here, but the path may contain folders separated by '/'! The specified path is joined with the value of the 'output.path' option to determine the location on disk.
  */
 export type HtmlChunkFilename = FilenameTemplate;
+
+/**
+ * How an attribute's value names a class or an id: `class` a class list (like `class`), `id` one id (like `id`), `ids` a list of ids (like `aria-labelledby`), `fragment` a same-page link, `#id` (like `href`), `url` `url(#id)` references (like `fill`).
+ * @since 5.113.0
+ */
+export type HtmlCssModulesAttributeKind =
+	"class" | "id" | "ids" | "fragment" | "url";
 
 /**
  * A single favicon `<link>`: either a path string (used as the icon `href`) or an object with the icon `href` plus extra link attributes (`sizes`, `media`, `color`, `type`, `crossorigin`).
@@ -1983,6 +2034,19 @@ export interface HtmlGeneratorOptions {
 export type HtmlParserAs = "document" | string;
 
 /**
+ * How a page's CSS modules rewrite it.
+ * @since 5.113.0
+ */
+export interface HtmlParserCssModules {
+	/**
+	 * Attributes whose values are rewritten with the page's CSS module names too, each with how its value names a class or an id, besides the built-in ones (`class`, `id`, `for`, `aria-labelledby`, `href="#id"`, `fill="url(#id)"`, `begin="id.click"`, ...); e.g. `{ "data-target": "id" }`.
+	 */
+	attributes?: {
+		[k: string]: HtmlCssModulesAttributeKind;
+	};
+}
+
+/**
  * Parser options for html modules.
  * @publishes plugins/HtmlParserOptions
  */
@@ -1998,7 +2062,17 @@ export interface HtmlParserOptions {
 	 */
 	chunkName?: NonEmptyString | import("../lib/html/HtmlParser").HtmlChunkNameFn;
 	/**
-	 * Configure extraction of URL-like attribute values (e.g. `<img src>`, `<link href>`, `<script src>`) as webpack dependencies. `true` (default) uses the built-in source list; `false` disables extraction entirely so attributes are left untouched and `<script src>` / `<link rel="modulepreload">` / `<link rel="stylesheet">` no longer become compilation entries; an array lets you customize which `tag`/`attribute` pairs are treated as URLs and how they are bundled. Use the string `"..."` inside the array to inline the defaults. Inline `<script>` and `<style>` bodies are always processed. Use `webpackIgnore` comments or `IgnorePlugin` to skip individual URLs.
+	 * How a page's CSS modules — `<style module>` bodies and linked stylesheets that are CSS modules — rewrite it.
+	 * @since 5.113.0
+	 */
+	cssModules?: HtmlParserCssModules;
+	/**
+	 * Report each HTML parse error the page holds, by its WHATWG or html5lib name: a build error where end of input cuts a tag, comment or doctype short, a build warning for one the parser reads past. Off by default.
+	 * @since 5.113.0
+	 */
+	parseErrors?: boolean;
+	/**
+	 * Configure extraction of URL-like attribute values (e.g. `<img src>`, `<link href>`, `<script src>`) as webpack dependencies. `true` (default) uses the built-in source list; `false` disables extraction entirely so attributes are left untouched and `<script src>` / `<link rel="modulepreload">` / `<link rel="stylesheet">` no longer become compilation entries; an array lets you customize which `tag`/`attribute` pairs are treated as URLs and how they are bundled. Use the string `"..."` inside the array to inline the defaults. Inline `<script>` and `<style>` bodies are always processed; one whose `lang` names another language is a `data:` module typed as that language's files (`<style lang="scss">` as `text/x-scss`, `<script lang="ts">` as `text/typescript`), and any other valid media-type name as `text/x-<lang>`, so a `mimetype` rule runs its loader. A `<style module>` body is a CSS module, and the page's `class` and `id` values, the ids its `for`, `form`, `list`, `headers`, `itemref`, `popovertarget`, `commandfor`, `interestfor` and `aria-*` reference attributes name, its same-page `href="#id"` links, SVG `url(#id)` references and SMIL `id.event` timings are rewritten with the names it and any linked stylesheet that is a CSS module declare (see `cssModules`); `<style module="card">` or `<link rel="stylesheet" module="card">` names a module, read as `card.btn`; a page with neither is left as it is. Use `webpackIgnore` comments or `IgnorePlugin` to skip individual URLs.
 	 */
 	sources?:
 		| /** Sources to extract as webpack dependencies. Use `"..."` to inline the default source list. @minItems 1 */ Array<
@@ -2173,9 +2247,11 @@ export type IgnoreWarnings = Array<
 	| /** Ignore specific warnings. */ /** A RegExp to select the warning message. */ RegExp
 	| {
 			/**
-			 * A RegExp to select the origin file for the warning.
+			 * A RegExp or a glob to select the origin file for the warning.
 			 */
-			file?: RegExp;
+			file?:
+				| RegExp
+				| /** A glob matching the origin file for the warning at any depth. @since 5.112.0 */ NonEmptyString;
 			/**
 			 * A RegExp to select the warning message.
 			 */
@@ -2632,7 +2708,11 @@ export interface LazyCompilationOptions {
 	/**
 	 * Specify which entrypoints or import()ed modules should be lazily compiled. This is matched with the imported module and not the entrypoint name.
 	 */
-	test?: RegExp | string | import("../lib/hmr/LazyCompilationPlugin").TestFn;
+	test?:
+		| RegExp
+		| string
+		| import("../lib/hmr/LazyCompilationPlugin").TestFn
+		| GlobCondition;
 }
 
 /**
@@ -2953,10 +3033,12 @@ export type NoParse =
 	| /** @minItems 1 */ Array<
 			| /** Don't parse files matching. It's matched against the full resolved request. */ /** A regular expression, when matched the module is not parsed. */ RegExp
 			| /** An absolute path, when the module starts with this path it is not parsed. */ AbsolutePath
+			| /** A glob, when it matches the module's resource path at any depth the module is not parsed. @since 5.112.0 */ NonEmptyRelativePath
 			| import("../lib/module/NormalModule").NoParseFn
 	  >
 	| /** A regular expression, when matched the module is not parsed. */ RegExp
 	| /** An absolute path, when the module starts with this path it is not parsed. */ AbsolutePath
+	| /** A glob, when it matches the module's resource path at any depth the module is not parsed. @since 5.112.0 */ NonEmptyRelativePath
 	| import("../lib/module/NormalModule").NoParseFn;
 
 /**
@@ -3109,6 +3191,11 @@ export interface Optimization {
  */
 export interface OptimizationMinimizeCss {
 	/**
+	 * How the minimizer states a `.css` asset's encoding. `"auto"` (the default) opens it with `@charset "UTF-8"` only when its output holds a non-ASCII character, so it is read as UTF-8 wherever the server's `Content-Type` names no other charset, which `@charset` cannot override. `false` writes no `@charset` at all, and writes an escaped character past U+FFFF (an icon font's `content: "\F0A86"`) as the character itself, as `"auto"` does once that `@charset` is written. Set `false` only where the asset is read as UTF-8 anyway: a stylesheet with no `@charset` is read in the encoding the server's `Content-Type` names, else in the encoding of the page linking it, so it holds wherever the server names UTF-8 or the page is UTF-8 — and anywhere else every such character reads as other characters.
+	 * @since 5.112.0
+	 */
+	charset?: "auto" | false;
+	/**
 	 * Write a color the `browserslist` target cannot read as an extra declaration before the one naming it, in a spelling it does read: `color: oklch(59.686% 0.15619 49.7694)` is written as `color: #c65d06` and then the `oklch()` itself, so an engine reading neither the Lab family nor `hwb()` is left with a color rather than with nothing. The fallback is that color clipped into the sRGB gamut and rounded, which the declaration standing after it corrects wherever it is read. Nothing is written where the author already set the property earlier in the same block, where the color holds a substitution or a relative reference this cannot fold, or where the fallback would still name a function the target cannot read. On by default, and only in effect for a `browserslist` target — any other target names no browsers to answer for.
 	 * @since 5.111.0
 	 */
@@ -3144,7 +3231,7 @@ export interface OptimizationMinimizeCss {
 	 */
 	customSelectors?: boolean;
 	/**
-	 * Drop a declaration a later one in the same block overrides even where nothing states that the target can read the later value. Off by default. With a `browserslist` target this is already done wherever every browser it names is known to read the later value, so the option only widens the case where no target is selected and there are no engines to name — which is what csso and cssnano do unconditionally. What it gives up is the fallback pair: `color:#c65d06;color:lab(50% 100 -100)` loses the hex, so an engine that cannot read `lab()` is left with nothing. A selection naming a browser the compat tables do not cover is still answered for the whole of it rather than by this option, since naming a browser states a target the option does not override.
+	 * Drop a declaration a later one in the same block overrides even where no target is selected, assuming the engines shipping today: wherever Chromium, Gecko and WebKit each read the later value. Off by default. With a `browserslist` target this is already done wherever every browser it names is known to read the later value, so the option only widens the case where no target is selected and there are no engines to name — which is what csso and cssnano do unconditionally. What it gives up is the fallback pair: `color:#c65d06;color:lab(50% 100 -100)` loses the hex, so an engine that cannot read `lab()` is left with nothing. A selection naming a browser the compat tables do not cover is still answered for the whole of it rather than by this option, since naming a browser states a target the option does not override.
 	 * @since 5.112.0
 	 */
 	dropOverriddenDeclarations?: boolean;
@@ -3203,6 +3290,11 @@ export interface OptimizationMinimizeCss {
 	 * @since 5.110.0
 	 */
 	removeDeadRules?: boolean;
+	/**
+	 * Print a style rule's declarations in one order by property family, the properties no family names first where they were written, so blocks setting the same things read alike and compress smaller. Only declarations whose order nothing can see move: two spellings of one property, a shorthand and what it sets, two shorthands sharing a longhand, and a flow-relative side and a physical one keep theirs, and a block holding a property no dataset names or a nested rule is printed as written. On by default.
+	 * @since 5.112.0
+	 */
+	reorderDeclarations?: boolean;
 	/**
 	 * Shorten the values of custom properties (`--x: #ffffff` -> `#fff`, `--y: 0.5rem` -> `.5rem`), which are otherwise written back exactly as authored. Off by default: `getComputedStyle().getPropertyValue()` hands this text back, so a rewritten value is a different CSSOM — the one place a declaration's authored text survives. What it may rewrite is exactly what any other value's tokens may be, a color in a substitution's fallback included — that fallback being the property's value rather than the function's own argument.
 	 * @since 5.110.0
@@ -3311,7 +3403,7 @@ export interface OptimizationMinimizeHtml {
 	 */
 	mergeStyles?: boolean;
 	/**
-	 * Minify the markup inside a downlevel-hidden conditional comment (`<!--[if IE]> … <![endif]-->`). Off by default: the body is minified on its own, so a context-sensitive decision inside it — which end tags are optional, where a table cell may sit — is taken as though it started a document rather than where the comment sits. Only browsers older than IE10 read these at all.
+	 * Minify the markup inside a downlevel-hidden conditional comment (`<!--[if IE]> … <![endif]-->`). Off by default. The body is minified on its own with every tag it spells kept, and one whose print would still add, drop or move a tag — a wrapper another comment closes, a row of the table it sits in — is left as written, as it is read where the comment sits rather than as a document. Only browsers older than IE10 read these at all.
 	 * @since 5.110.0
 	 */
 	minifyConditionalComments?: boolean;
@@ -3346,7 +3438,7 @@ export interface OptimizationMinimizeHtml {
 	 */
 	removeEmptyAttributes?: boolean;
 	/**
-	 * Drop an element that has no children and no attributes. Kept anyway when its bare form is still doing a job (`canvas`, `slot`, `template`, `textarea`, `progress`, `meter`, `output`, `dialog`, and the table structure), when it is a void element, or when it is foreign content. Off by default: CSS can give an empty element a size or a `::before`, and the minifier cannot see the stylesheet. Emptiness is read off the output rather than the source, so a run of nested empties goes together and an element left empty only by a dropped comment or by whitespace `collapseWhitespace` deletes goes with them.
+	 * Drop an element that has no children and no attributes, where its bare form renders nothing and nothing reads it: a generic container such as `div`, `span` or `section`, an inline phrase element, an empty `title`, `script` or `style`, or an attribute-less `meta`, `link` or `base`. Every other element is kept, including widgets, list items, elements with margins and custom elements. Off by default: CSS can give an empty element a size or a `::before`, and the minifier cannot see the stylesheet. Emptiness is read off the output rather than the source, so a run of nested empties goes together and an element left empty only by a dropped comment or by whitespace `collapseWhitespace` deletes goes with them.
 	 * @since 5.110.0
 	 */
 	removeEmptyElements?: boolean;
@@ -3361,7 +3453,7 @@ export interface OptimizationMinimizeHtml {
 	 */
 	removeOptionalTags?: boolean;
 	/**
-	 * Drop an attribute whose value is the one the element already defaults to. Off by default: an attribute a page no longer carries is one `getAttribute` and every attribute selector read differently, whichever tier dropped it. `true` (or `"smart"`) drops only markers on elements that render nothing — `<script type=text/javascript>`, `<script language=javascript>`, `<script charset=utf-8>`, `<style type=text/css>`, `<link type=text/css>`, `<link media=all>` — so no rule that styles the page stops applying, which is what `@swc/html` does by default. `"all"` also drops spec defaults such as `<input type=text>` and `<form method=get>`, which reaches further still: an attribute selector matches the content attribute, not the reflected default, so `input[type=text]` stops matching.
+	 * Drop an attribute whose value is the one the element already defaults to. Off by default: an attribute a page no longer carries is one `getAttribute` and every attribute selector read differently, whichever tier dropped it. `true` (or `"smart"`) drops only markers on elements that render nothing — `<script type=text/javascript>`, `<script language=javascript>`, `<script charset=utf-8>` on a page that declares UTF-8, `<style type=text/css>`, `<link type=text/css>`, `<link media=all>` — so no rule that styles the page stops applying, which is what `@swc/html` does by default. `"all"` also drops spec defaults such as `<input type=text>` and `<form method=get>`, which reaches further still: an attribute selector matches the content attribute, not the reflected default, so `input[type=text]` stops matching.
 	 * @since 5.110.0
 	 */
 	removeRedundantAttributes?: ("smart" | "all") | boolean;
@@ -3406,6 +3498,204 @@ export interface OptimizationMinimizeOptions {
 	 * @since 5.112.0
 	 */
 	json?: boolean;
+	/**
+	 * Minimize `.svg` and `.xml` assets: `false` disables it, an object enables it. Absent means off unless `experiments.futureDefaults` is set.
+	 * @since 5.112.0
+	 * @experimental
+	 */
+	xml?: false | OptimizationMinimizeXml;
+}
+
+/**
+ * What the XML minimizer does. The stylesheets an SVG or XHTML element holds are minified with `optimization.minimizeOptions.css` for the target's browsers. An SVG `data:` URL takes these switches too, and an `<svg>` inline in HTML takes `removeMetadata`, `shortenNumbers` and `shortenPathData`.
+ * @since 5.112.0
+ * @experimental
+ */
+export interface OptimizationMinimizeXml {
+	/**
+	 * Remove SVG IDs nothing in the document references and rename the rest to the shortest names, rewriting `href`, `url()` and ID-list references. Off by default because a reference from outside the document, such as a sprite's `file.svg#icon` or a page's `getElementById`, stops resolving; skip stylesheets, scripts, animations, duplicate IDs, `xml:id` and DTDs.
+	 * @since 5.113.0
+	 */
+	cleanupIds?: boolean;
+	/**
+	 * Collapse SVG groups, hoist identical context-free inherited attributes or move them to sole graphics children, inline validated presentation declarations and remove empty text, unnamed definitions and exact redundant attributes. Off by default because consumers can observe structure and attribute presence; preserve IDs and skip stylesheets, scripts, animations and DTDs.
+	 * @since 5.113.0
+	 */
+	cleanupStructure?: boolean;
+	/**
+	 * Remove whitespace-only text in known SVG containers, under `xml:space` too since that lays out text alone, preserving text content and foreign content. Off by default because scripts can observe whitespace nodes.
+	 * @since 5.113.0
+	 */
+	collapseWhitespace?: boolean;
+	/**
+	 * Which comments survive. `"some"`, the default, keeps an XML legal notice: a comment opening with `!` or annotated `@license` or `@preserve`; `true` (or `"all"`) keeps every comment and `false` keeps none; a string is read as a regular expression source, and it, a `RegExp` or a `(comment) => boolean` predicate is asked about each comment's own text and keeps the ones it accepts, standing in for the default rule rather than beside it. A `<?…?>` processing instruction is no comment and stays whatever this says. A predicate is handed to the minimizer's worker pool as source, so it must not close over anything.
+	 * @since 5.113.0
+	 */
+	comments?:
+		| ("all" | "some")
+		| RegExp
+		| boolean
+		| string
+		| ((comment: string) => boolean);
+	/**
+	 * Convert leaf SVG lines, polylines and polygons to shorter paths with identical coordinates and vertices, and equal-radius ellipses to circles. Off by default because consumers can observe element types; skip documents with stylesheets, scripts, animations or DTDs.
+	 * @since 5.113.0
+	 */
+	convertShapes?: boolean;
+	/**
+	 * With `shortenNumbers`, recompose each SVG transform list as the shortest list whose matrix matches it within `precision` decimals (3 when unset), such as a `matrix()` becoming `rotate(-45 261.757 -252.243)`. Off by default because the result is rounded, not exact.
+	 * @since 5.113.0
+	 */
+	convertTransforms?: boolean;
+	/**
+	 * Move the rules of SVG stylesheets into the style attributes of the elements they match, in cascade order before each element's own, then drop the stylesheets and the classes they named, where every selector uses types, classes, IDs, attributes, tree-structural pseudo-classes or `:not()` and the result is no larger. Off by default because scripts and external CSS can observe classes and stylesheets.
+	 * @since 5.113.0
+	 */
+	inlineStyles?: boolean;
+	/**
+	 * Merge adjacent SVG paths of any shape with the same attributes whose bounds, stroke included, do not overlap, outside IDs, styles, markers, dashes, clips, masks, filters and `url()` paint. Off by default because anti-aliasing can blend a pixel both paths reach differently once merged.
+	 * @since 5.113.0
+	 */
+	mergeDisjointPaths?: boolean;
+	/**
+	 * Merge adjacent disjoint axis-aligned SVG lines with explicit opaque crisp-edge strokes, no fill, dashes or markers. Skip compositing, transformed or ID-bearing ancestors; identical paint remains eligible during color cleanup. Off by default because consumers can observe element boundaries; skip stylesheets, scripts, animations and DTDs.
+	 * @since 5.113.0
+	 */
+	mergePaths?: boolean;
+	/**
+	 * Round SVG geometry, path data, transforms and presentation numbers to this many decimal places, a whole number from 0 to 15, wherever `shortenNumbers` and `shortenPathData` shorten them. Path points round where they land, so error never accumulates, and curves and arcs that draw straight lines become lines. Off by default because rounding moves geometry; svgo rounds to 3.
+	 * @since 5.113.0
+	 */
+	precision?: number;
+	/**
+	 * Remove attributes matching `element:attribute:value` patterns, each part a case-insensitive regular expression matched whole, `*` matching anything; a missing element or value part matches any. Off by default because only the author knows which attributes the image can lose.
+	 * @since 5.113.0
+	 */
+	removeAttributes?: Array</** An `element:attribute:value` pattern of attributes to remove. */ string>;
+	/**
+	 * Remove SVG `desc` elements. Off by default because they describe the image for assistive technology.
+	 * @since 5.113.0
+	 */
+	removeDescriptions?: boolean;
+	/**
+	 * Remove the root SVG element's `width` and `height`, moving plain ones into a missing `viewBox`, so the image scales to whatever box it is placed in. Off by default because the image loses its intrinsic size.
+	 * @since 5.113.0
+	 */
+	removeDimensions?: boolean;
+	/**
+	 * Remove a DOCTYPE without an internal subset where no entity reference needs one. Off by default because a validating consumer reads the DTD it names.
+	 * @since 5.113.0
+	 */
+	removeDoctype?: boolean;
+	/**
+	 * Remove elements and attributes in known editor namespaces within SVG, preserving namespace declarations and unrelated XML data. Off by default because editor data may be needed to edit the image.
+	 * @since 5.113.0
+	 */
+	removeEditorData?: boolean;
+	/**
+	 * Remove elements with one of these IDs or classes, with their content. Off by default because only the author knows which elements the image can lose.
+	 * @since 5.113.0
+	 */
+	removeElements?: {
+		/**
+		 * Classes whose elements are removed.
+		 */
+		class?: Array</** A class whose elements are removed. */ string>;
+		/**
+		 * IDs whose elements are removed.
+		 */
+		id?: Array</** An ID whose element is removed. */ string>;
+	};
+	/**
+	 * Remove empty `class`, `id` and `style` attributes on SVG elements unless the DTD declares them. Off by default because selectors and scripts can observe attribute presence.
+	 * @since 5.113.0
+	 */
+	removeEmptyAttributes?: boolean;
+	/**
+	 * Remove empty SVG `g` and `defs` containers having only namespace declarations, preserving other attributes and DTD defaults. Off by default because selectors and scripts can observe document structure.
+	 * @since 5.113.0
+	 */
+	removeEmptyElements?: boolean;
+	/**
+	 * Remove ID-free SVG content that renders nothing: `display="none"`, zero opacity outside clip paths, zero-size rectangles, circles, ellipses and images, paths and point lists that draw nothing, shapes that paint neither fill nor stroke, uses of what draws nothing, `tref` elements without a reference, and subtrees under `visibility="hidden"` that never set it back. Off by default because such content can still be read, and zero opacity still receives pointer events; skip what a style, a `switch` or (for opacity and sizes) an ancestor's filter, mask or clip path can observe, and documents with stylesheets, scripts, animations or DTDs.
+	 * @since 5.113.0
+	 */
+	removeHiddenElements?: boolean;
+	/**
+	 * Remove SVG `metadata` elements and their contents, preserving `title`, `desc` and the document element. Off by default because metadata can carry licensing and application data.
+	 * @since 5.113.0
+	 */
+	removeMetadata?: boolean;
+	/**
+	 * Remove unnamed SVG paths whose bounds, stroke included, lie wholly outside the root `viewBox`, outside transforms, filters, markers and styles. Off by default because a viewport of another aspect ratio letterboxes the `viewBox` and shows what lies past it.
+	 * @since 5.113.0
+	 */
+	removeOffCanvasPaths?: boolean;
+	/**
+	 * Remove SVG `image` elements referencing JPEG, PNG or GIF images. Off by default because those images disappear from the drawing.
+	 * @since 5.113.0
+	 */
+	removeRasterImages?: boolean;
+	/**
+	 * Remove `script` elements, event handler and `srcdoc` attributes, `javascript:` and `vbscript:` URLs and links to HTML or SVG `data:` documents, for SVG that must not run code. Off by default because the image loses its behavior.
+	 * @since 5.113.0
+	 */
+	removeScripts?: boolean;
+	/**
+	 * Remove SVG `title` elements. Off by default because they name the image for assistive technology and tooltips.
+	 * @since 5.113.0
+	 */
+	removeTitles?: boolean;
+	/**
+	 * Remove unused prefixed namespace declarations within SVG, preserving default namespaces and prefixes referenced in names or content. Off by default because scripts can observe namespace declarations.
+	 * @since 5.113.0
+	 */
+	removeUnusedNamespaces?: boolean;
+	/**
+	 * Remove the root SVG element's `viewBox` where it restates its plain `width` and `height`. Off by default because the image then no longer scales when CSS gives it another size.
+	 * @since 5.113.0
+	 */
+	removeViewBox?: boolean;
+	/**
+	 * Spell `xlink:href` as the SVG 2 `href` where an element has no `href`, a link's `xlink:show` as `target`, and drop `xlink:type="simple"`, so the XLink namespace declaration can go. Off by default because browsers before SVG 2 read only `xlink:href`.
+	 * @since 5.113.0
+	 */
+	removeXlink?: boolean;
+	/**
+	 * Reuse unidentified duplicate leaf SVG paths without transforms through existing IDs and SVG 2 href references, preserving IDs and target element types. Require explicit context-free fill and stroke; compare identical authored paint before color cleanup. Off by default because consumers can observe element types; skip stylesheets, scripts, animations, duplicate IDs and DTDs.
+	 * @since 5.113.0
+	 */
+	reusePaths?: boolean;
+	/**
+	 * Shorten opaque SVG presentation colors using the CSS minifier, preserving paint servers, contextual colors and DTD-declared values. Off by default because selectors and scripts can observe attribute spelling.
+	 * @since 5.113.0
+	 */
+	shortenColors?: boolean;
+	/**
+	 * Shorten SVG geometry and transform decimals and separators without rounding, changing units or rewriting exponent notation. Preserve DTD-declared values; off by default because selectors and scripts can observe attribute spelling.
+	 * @since 5.113.0
+	 */
+	shortenNumbers?: boolean;
+	/**
+	 * Compact SVG path numbers, repeated commands and separators without rounding or changing segments, preserving arc flags and DTD-declared values. Off by default because selectors and scripts can observe attribute spelling.
+	 * @since 5.113.0
+	 */
+	shortenPathData?: boolean;
+	/**
+	 * Print attributes with the document's commonest names first, breaking ties by case-sensitive name. Off by default: consumers observing attribute order see the new order.
+	 * @since 5.112.0
+	 */
+	sortAttributes?: boolean;
+	/**
+	 * Sort adjacent SVG resource definitions within defs by type and ID, preserving IDs and references. Off by default because consumers can observe order; skip stylesheets, scripts, animations, duplicate IDs and DTDs.
+	 * @since 5.113.0
+	 */
+	sortDefinitions?: boolean;
+	/**
+	 * Sort adjacent SVG symbol definitions by ID, preserving IDs and references. Off by default because consumers can observe definition order; skip documents with stylesheets, scripts, animations, duplicate IDs or DTDs.
+	 * @since 5.113.0
+	 */
+	sortSymbols?: boolean;
 }
 
 /**
@@ -3648,7 +3938,10 @@ export interface OptimizationSplitChunksCacheGroup {
 	 * Assign modules to a cache group by module name.
 	 */
 	test?:
-		RegExp | string | import("../lib/optimize/SplitChunksPlugin").CheckTestFn;
+		| RegExp
+		| string
+		| import("../lib/optimize/SplitChunksPlugin").CheckTestFn
+		| GlobCondition;
 	/**
 	 * Assign modules to a cache group by module type.
 	 */
@@ -3822,6 +4115,11 @@ export type OptimizationSplitChunksSizes =
  * Options affecting the output of the compilation. `output` options tell webpack how to write the compiled files to disk.
  */
 export interface Output {
+	/**
+	 * Where files may be written, copied and cleaned outside of 'output.path'. 'true' allows anywhere, 'false' nowhere, and a list allows only inside those directories. When unset, assets plugins emit there are still written (refused with 'experiments.futureDefaults'), while 'output.copy' and 'output.clean' stay inside 'output.path'.
+	 * @since 5.113.0
+	 */
+	allowOutside?: AllowOutside;
 	/**
 	 * @cliExclude
 	 */
@@ -4183,8 +4481,8 @@ export interface OutputHtmlOptions {
 	manifest?:
 		| false
 		| NonEmptyString
-		| /** @additionalProperties */ { [key: string]: any }
-		| ((name: string) => false | string | { [key: string]: EXPECTED_ANY });
+		| /** @additionalProperties */ import("../lib/fs/fs").JsonObject
+		| ((name: string) => false | string | import("../lib/fs/fs").JsonObject);
 	/**
 	 * Inject `<meta>` tags into the page `<head>`. Each key is the `name` attribute (or `"charset"` for a charset declaration); the value is the `content` string. Keys beginning with `og:` use the `property` attribute instead of `name`. A tag is skipped if the HTML already contains a meta with the same name.
 	 * @since 5.109.0
@@ -4216,6 +4514,11 @@ export type OutputModule = boolean;
  * @required environment, enabledChunkLoadingTypes, enabledLibraryTypes, enabledWasmLoadingTypes
  */
 export interface OutputNormalized {
+	/**
+	 * Where files may be written, copied and cleaned outside of 'output.path'. 'true' allows anywhere, 'false' nowhere, and a list allows only inside those directories. When unset, assets plugins emit there are still written (refused with 'experiments.futureDefaults'), while 'output.copy' and 'output.clean' stay inside 'output.path'.
+	 * @since 5.113.0
+	 */
+	allowOutside?: AllowOutside;
 	/**
 	 * The filename of asset modules as relative path inside the 'output.path' directory.
 	 */
@@ -4946,6 +5249,7 @@ export interface ResolveOptions {
 	restrictions?: Array<
 		| /** Resolve restriction. Resolve result must fulfill this restriction. */ RegExp
 		| AbsolutePath
+		| /** A glob the resolve result must match at any depth. @since 5.112.0 */ NonEmptyRelativePath
 	>;
 	/**
 	 * A list of directories in which requests that are server-relative URLs (starting with '/') are resolved.
@@ -4974,7 +5278,9 @@ export interface ResolveOptions {
 	/**
 	 * Enable caching of successfully resolved requests (cache entries are not revalidated).
 	 */
-	unsafeCache?: boolean | /** @additionalProperties */ { [key: string]: any };
+	unsafeCache?:
+		| boolean
+		| /** @additionalProperties */ import("../lib/resolve/ResolverFactory").UnsafeCache;
 	/**
 	 * Use synchronous filesystem calls for the resolver.
 	 */
@@ -5349,6 +5655,11 @@ export type RuleSetUseItem =
 			 * Loader options.
 			 */
 			options?: RuleSetLoaderOptions;
+			/**
+			 * Run the loader's normal function only when its current input matches this condition, the same kind of condition 'test' takes. Input that is not valid UTF-8 text always runs it.
+			 * @since 5.113.0
+			 */
+			sourceTest?: RuleSetConditionOrConditions;
 	  }
 	| RuleSetUseFunction
 	| RuleSetLoader;

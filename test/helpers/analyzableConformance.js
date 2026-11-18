@@ -7,48 +7,11 @@ const fs = require("fs");
 const path = require("path");
 const acorn = require("acorn");
 const ConcatenatedModule = require("../../lib/optimize/ConcatenatedModule");
+const { decodeUrlPath } = require("../harness/runner/RunnerHelpers");
 
 /** @import Chunk from "../../lib/graph/Chunk" */
 /** @import Compilation from "../../lib/Compilation" */
 /** @import Module from "../../lib/module/Module" */
-
-/** @type {typeof import("es-module-lexer") | null | undefined} */
-let lexer;
-
-/**
- * The lexer reads what acorn is behind on, but its wasm needs a newer engine
- * than the oldest one the suite runs on, so it is asked for only as a fallback.
- * @param {string} code the emitted source
- * @returns {string[] | undefined} literal import specifiers, where it could read
- */
-const lexerSpecifiersOf = (code) => {
-	if (lexer === undefined) {
-		lexer = null;
-		try {
-			// Loading it compiles its wasm right there, and an engine too old to
-			// decode that rejects a promise nothing else would ever read.
-			const loaded = require("es-module-lexer");
-
-			loaded.init.catch(() => {});
-			loaded.initSync();
-			lexer = loaded;
-		} catch (_error) {
-			lexer = null;
-		}
-	}
-	if (!lexer) return;
-	try {
-		const [imports] = lexer.parse(code);
-		/** @type {string[]} */
-		const found = [];
-		for (const entry of imports) {
-			if (entry.n !== undefined) found.push(entry.n);
-		}
-		return found;
-	} catch (_error) {
-		return undefined;
-	}
-};
 
 const JS_ASSET = /\.[cm]?js$/;
 // A specifier naming a place rather than a package: what webpack emitted is
@@ -142,9 +105,12 @@ const literalSpecifiersOf = (code) => {
 			allowHashBang: true
 		});
 	} catch (_error) {
-		// Syntax acorn is behind on, which a lexer still reads; a url needs the
-		// tree, so only the imports come back here.
-		return lexerSpecifiersOf(code);
+		// Syntax acorn is behind on, which webpack's import scan still reads; a
+		// url needs the tree, so only the imports come back here.
+		const { collectEsmImportSpecifiers } =
+			require("../../lib/javascript/syntax").parser;
+
+		return [...collectEsmImportSpecifiers(code).keys()];
 	}
 	/** @type {string[]} */
 	const found = [];
@@ -167,11 +133,18 @@ const literalSpecifiersOf = (code) => {
  */
 const placeOf = (specifier, fromDirectory) => {
 	const [withoutHash] = specifier.split("#");
-	const [text] = withoutHash.split("?");
-	if (HAS_SCHEME.test(text)) {
-		if (!/^(?:https?:|\/\/)/i.test(text)) return;
-		const { pathname } = new URL(text.startsWith("//") ? `http:${text}` : text);
-		return { place: pathname.replace(/^\/+/, ""), inside: false };
+	const [written] = withoutHash.split("?");
+	// A specifier is read as a URL: the file it names is its path decoded.
+	const text = decodeUrlPath(written);
+	if (HAS_SCHEME.test(written)) {
+		if (!/^(?:https?:|\/\/)/i.test(written)) return;
+		const { pathname } = new URL(
+			written.startsWith("//") ? `http:${written}` : written
+		);
+		return {
+			place: decodeUrlPath(pathname).replace(/^\/+/, ""),
+			inside: false
+		};
 	}
 	// A trailing slash names the directory a runtime resolves against — the
 	// public path itself — rather than a file webpack emitted.

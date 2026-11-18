@@ -1,3 +1,6 @@
+/// <reference lib="es2021.weakref" />
+// cspell:ignore weakref
+
 "use strict";
 
 const WeakTupleMap = require("../../lib/util/WeakTupleMap");
@@ -21,6 +24,29 @@ describe("WeakTupleMap", () => {
 		expect(map.get(keyA, keyB)).toBe("value");
 		expect(map.has(keyA, keyB)).toBe(true);
 		expect(map.get(keyA, {})).toBeUndefined();
+	});
+
+	it("should hold function elements weakly", async () => {
+		const map = new WeakTupleMap();
+		/** @type {WeakRef<() => void>[]} */
+		const refs = [];
+		(() => {
+			for (let i = 0; i < 50; i++) {
+				// ModuleGraph.cached keys its cache by the cached function
+				const fn = () => {};
+				map.set(fn, "value");
+				expect(map.get(fn)).toBe("value");
+				refs.push(new WeakRef(fn));
+			}
+		})();
+		// a WeakRef target stays alive until the current job ends
+		await new Promise((resolve) => {
+			setImmediate(resolve);
+		});
+		/** @type {() => void} */ (globalThis.gc)();
+		// Bun's conservative stack scan may keep any one function alive, while a
+		// map holding them strongly keeps every one.
+		expect(refs.some((ref) => ref.deref() === undefined)).toBe(true);
 	});
 
 	it("should mix weak and strong key elements in one tuple", () => {
@@ -147,5 +173,45 @@ describe("WeakTupleMap", () => {
 		map.set(objB, 2);
 		expect(map.get(objA)).toBe(1);
 		expect(map.get(objB)).toBe(2);
+	});
+
+	it("types a module memo cache by its keys, undefined included", () => {
+		/** @type {import("../../lib/Compiler").MemCache} */
+		const memCache = new WeakTupleMap();
+		/** @type {import("../../lib/Compiler").MemCacheKey<string>} */
+		const stringKey = "string";
+		/** @type {import("../../lib/Compiler").MemCacheKey<string | undefined>} */
+		const maybeKey = "maybe";
+		/** @type {import("../../lib/Compiler").MemCacheKey<undefined>} */
+		const undefinedKey = "undefined";
+
+		memCache.set(stringKey, "a");
+		memCache.set(maybeKey, undefined);
+		memCache.set(undefinedKey, undefined);
+		/** @type {string | undefined} */
+		const read = memCache.get(stringKey);
+		expect(read).toBe("a");
+		expect(memCache.provide(maybeKey, () => undefined)).toBeUndefined();
+
+		// Only type-checked: a value the key does not allow is refused.
+		const refused = () => {
+			// @ts-expect-error a typed key takes only its value type
+			memCache.set(stringKey, 1);
+			// @ts-expect-error nor an undefined it does not allow
+			memCache.set(stringKey, undefined);
+			// @ts-expect-error a key that holds undefined takes nothing else
+			memCache.set(undefinedKey, "a");
+			// @ts-expect-error provide checks the function against the key's type
+			memCache.provide(stringKey, () => 1);
+		};
+		expect(typeof refused).toBe("function");
+
+		// A plain key holds whatever a plugin stored, and provide answers with
+		// what its function returns.
+		memCache.set("plain", { count: 1 });
+		expect(memCache.get("plain").count).toBe(1);
+		/** @type {number} */
+		const provided = memCache.provide("other", () => 2);
+		expect(provided).toBe(2);
 	});
 });

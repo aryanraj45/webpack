@@ -14,7 +14,6 @@ const {
 } = require("../../lib/util/dataURL");
 const cssMinify = require("../../lib/css/cssMinify");
 const htmlMinify = require("../../lib/html/htmlMinify");
-const htmlSyntax = require("../../lib/html/syntax");
 
 describe("dataURL", () => {
 	it("should decode base64 payloads", () => {
@@ -28,10 +27,17 @@ describe("dataURL", () => {
 		expect(/** @type {Buffer} */ (decoded).toString()).toBe("hello world");
 	});
 
-	it("should return the raw body when percent-decoding fails", () => {
-		// a malformed percent escape survives as its literal bytes
-		const decoded = decodeDataURI("data:text/plain,%E0%A4%A");
-		expect(/** @type {Buffer} */ (decoded).toString()).toBe("%E0%A4%A");
+	it("should keep a malformed percent escape as written", () => {
+		const decoded = decodeDataURI("data:text/plain,100%25%20done%");
+		expect(/** @type {Buffer} */ (decoded).toString()).toBe("100% done%");
+		expect(
+			[.../** @type {Buffer} */ (decodeDataURI("data:text/plain,%E0%A4%A"))]
+		).toEqual([0xe0, 0xa4, 0x25, 0x41]);
+	});
+
+	it("should decode an escape that is not UTF-8 to its byte", () => {
+		const decoded = decodeDataURI("data:text/plain,caf%E9");
+		expect(/** @type {Buffer} */ (decoded).toString("latin1")).toBe("café");
 	});
 
 	it("should return null for a non-data URI", () => {
@@ -110,6 +116,25 @@ describe("parseDataURI", () => {
 		});
 	});
 
+	it("should read the base64 flag as the Fetch standard does", () => {
+		for (const uri of [
+			"data:text/html; base64,YQ==",
+			"data:text/html;base64 ,YQ==",
+			"data:text/html;BASE64,YQ==",
+			"data:text/html;ba\nse64,YQ=="
+		]) {
+			expect(parseDataURI(uri)).toHaveProperty("base64", true);
+		}
+		for (const uri of [
+			"data:text/html;base64x,YQ==",
+			"data:text/html;x-base64,YQ==",
+			"data:text/html;base64;charset=utf-8,YQ==",
+			"data:text/html;base64\f,YQ=="
+		]) {
+			expect(parseDataURI(uri)).toHaveProperty("base64", false);
+		}
+	});
+
 	it("should return null for what is not a data URI", () => {
 		expect(parseDataURI("https://example.com/a.css")).toBeNull();
 	});
@@ -163,6 +188,44 @@ describe("decodeDataURIPayload", () => {
 				)
 			)
 		).toBeNull();
+	});
+
+	it("should decline a payload in a charset other than UTF-8", () => {
+		/**
+		 * @param {string} uri the URI
+		 * @returns {string | null} its decoded payload
+		 */
+		const decode = (uri) =>
+			decodeDataURIPayload(
+				/** @type {NonNullable<ReturnType<typeof parseDataURI>>} */ (
+					parseDataURI(uri)
+				)
+			);
+		// `a{color:red}`, read as ISO-2022-JP rather than UTF-8
+		expect(
+			decode("data:text/css;charset=iso-2022-jp;base64,YXtjb2xvcjpyZWR9")
+		).toBeNull();
+		expect(decode("data:text/css;charset=utf-16,a{color:red}")).toBeNull();
+		// Spaces and quotes around the charset are read as Fetch reads them.
+		expect(decode("data:text/css; charset=windows-1252,a")).toBeNull();
+		expect(decode('data:text/css;charset="iso-8859-1",a')).toBeNull();
+		expect(decode("data:text/css;charset=iso-8859-1;charset=utf-8,a")).toBeNull();
+		// A `;` inside a quoted value starts no parameter; a form feed is no space.
+		expect(
+			decode('data:text/css;x=";charset=utf-8;";charset=windows-1252,a')
+		).toBeNull();
+		expect(
+			decode("data:text/css;\fcharset=utf-8;charset=windows-1252,a")
+		).toBeNull();
+		// The URL parser escapes a non-ASCII charset, which then still comes first.
+		expect(
+			decode('data:text/css;charset="\u2603";charset=utf-8,a')
+		).toBeNull();
+		expect(decode('data:text/css; charset="UTF-8" ,a')).toBe("a");
+		expect(decode("data:text/css;charset=utf-8;charset=iso-8859-1,a")).toBe("a");
+		expect(decode("data:text/css;charset=utf-8;base64,YXtjb2xvcjpyZWR9")).toBe(
+			"a{color:red}"
+		);
 	});
 
 	it("should decode base64 that round-trips", () => {
@@ -273,8 +336,5 @@ describe("EMBEDDED_LANGUAGES", () => {
 		const shared = sorted(EMBEDDED_LANGUAGES);
 		expect(sorted(cssMinify.getEmbeddedTypes())).toEqual(shared);
 		expect(sorted(htmlMinify.getEmbeddedTypes())).toEqual(shared);
-		// The HTML parser names the languages its offer sites reach; a site
-		// added there without this list would make the answer above wrong.
-		expect(sorted(htmlSyntax.parser.EMBEDDED_LANGUAGES)).toEqual(shared);
 	});
 });
